@@ -150,6 +150,11 @@ def mark_event_processed(
     return _update(db, "raw_events", event_id, values)
 
 
+def record_event_error(db: Database, event_id: str, error: str) -> Row:
+    """Note why processing failed but leave the event unprocessed so it can be retried."""
+    return _update(db, "raw_events", event_id, {"process_error": error})
+
+
 # -- threads -----------------------------------------------------------------------
 
 

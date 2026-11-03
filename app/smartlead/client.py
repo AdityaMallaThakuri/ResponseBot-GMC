@@ -152,6 +152,25 @@ class SmartleadClient:
             json={"offset": offset, "limit": limit, "filters": {"campaignId": campaign_ids}},
         )
 
+    def find_inbox_item(
+        self, campaign_id: int, lead_email: str, max_pages: int = 10
+    ) -> dict[str, Any] | None:
+        """The master-inbox item for a lead, found by email. Read only; None if not found."""
+        target = lead_email.strip().lower()
+        for page in range(max_pages):
+            response = self.fetch_master_inbox_replies(
+                [campaign_id], limit=MAX_LIMIT, offset=page * MAX_LIMIT
+            )
+            items = response.get("data") if isinstance(response, dict) else None
+            if not isinstance(items, list):
+                raise SmartleadError("unexpected master-inbox response shape")
+            for item in items:
+                if str(item.get("lead_email", "")).strip().lower() == target:
+                    return item
+            if len(items) < MAX_LIMIT:
+                return None
+        return None
+
     def get_thread_raw(self, lead: Lead) -> Any:
         return self._request(
             "GET", f"/campaigns/{lead.campaign_id}/leads/{lead.lead_id}/message-history"

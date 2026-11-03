@@ -1,0 +1,14 @@
+{
+  "event_type": "EMAIL_REPLY",
+  "from_email": "ray@gamicmedia.example",
+  "subject": "Re: Quick question about deal flow",
+  "to_email": "jane@example.com",
+  "to_name": "Jane Example",
+  "time_replied": "2026-10-20T14:00:00Z",
+  "reply_body": "<p>Sounds interesting, tell me more.</p>",
+  "preview_text": "Sounds interesting, tell me more.",
+  "campaign_name": "GMC - Example Campaign",
+  "campaign_id": 101,
+  "client_id": 456,
+  "sequence_number": 1
+}

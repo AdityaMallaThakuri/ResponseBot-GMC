@@ -9,7 +9,7 @@ REQUIRED = {
     "SLACK_SIGNING_SECRET": "test",
     "SUPABASE_URL": "https://example.supabase.co",
     "SUPABASE_SERVICE_KEY": "test",
-    "WEBHOOK_SECRET": "test",
+    "WEBHOOK_SECRET": "w" * 32 + "-test-webhook-secret",
 }
 
 

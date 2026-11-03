@@ -1,0 +1,95 @@
+"""Tests for scripts/replay_webhook.py, end to end against the real route with fakes behind it."""
+
+import hashlib
+import hmac
+import json
+import sys
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+import replay_webhook as rw  # noqa: E402
+
+from app.config.settings import get_settings  # noqa: E402
+from app.ingest.deps import IngestDeps  # noqa: E402
+from app.main import app  # noqa: E402
+from tests.conftest import REQUIRED as GOOD_VALUES  # noqa: E402
+from tests.fakedb import FakeDb  # noqa: E402
+from tests.test_webhook import FakeSmartlead  # noqa: E402
+
+SECRET = GOOD_VALUES["WEBHOOK_SECRET"]
+PATH = "/webhooks/smartlead"
+
+
+@pytest.fixture
+def server(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, FakeDb]]:
+    for key, value in GOOD_VALUES.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("GMC_CAMPAIGN_IDS", "101")
+    get_settings.cache_clear()
+    db = FakeDb()
+    app.state.ingest = IngestDeps(db=db, smartlead=FakeSmartlead())
+    yield TestClient(app), db
+    del app.state.ingest
+    get_settings.cache_clear()
+
+
+def test_signature_is_an_hmac_of_the_exact_body() -> None:
+    body, headers = rw.build_request({"a": 1}, SECRET)
+    expected = hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
+    assert headers["X-Smartlead-Signature"] == f"sha256={expected}"
+    assert SECRET.encode() not in body
+
+
+def test_other_auth_modes_carry_the_secret_where_expected() -> None:
+    body, headers = rw.build_request({"a": 1}, SECRET, "header")
+    assert headers["X-Webhook-Secret"] == SECRET and b"secret_key" not in body
+    body, headers = rw.build_request({"a": 1}, SECRET, "body")
+    assert json.loads(body)["secret_key"] == SECRET and "X-Webhook-Secret" not in headers
+    with pytest.raises(ValueError):
+        rw.build_request({}, SECRET, "nope")
+
+
+@pytest.mark.parametrize("auth", ["signature", "header", "body"])
+def test_replaying_the_fixture_is_accepted_and_processed(
+    server: tuple[TestClient, FakeDb], auth: str
+) -> None:
+    client, db = server
+    response = rw.replay(PATH, rw.DEFAULT_FIXTURE, SECRET, auth, client=client)
+    assert response.status_code == 200 and response.json() == {"status": "accepted"}
+    assert db.tables["raw_events"][0]["processed"] is True
+    assert "secret_key" not in db.tables["raw_events"][0]["payload"]
+
+
+def test_replaying_twice_is_a_duplicate_unless_fresh(server: tuple[TestClient, FakeDb]) -> None:
+    client, db = server
+    rw.replay(PATH, rw.DEFAULT_FIXTURE, SECRET, client=client)
+    assert rw.replay(PATH, rw.DEFAULT_FIXTURE, SECRET, client=client).json() == {
+        "status": "duplicate"
+    }
+    assert rw.replay(PATH, rw.DEFAULT_FIXTURE, SECRET, fresh=True, client=client).json() == {
+        "status": "accepted"
+    }
+    assert len(db.tables["raw_events"]) == 2
+
+
+def test_a_wrong_secret_gets_a_401(server: tuple[TestClient, FakeDb]) -> None:
+    client, db = server
+    response = rw.replay(PATH, rw.DEFAULT_FIXTURE, "z" * 40, client=client)
+    assert response.status_code == 401 and "raw_events" not in db.tables
+
+
+def test_secret_comes_from_the_argument_or_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert rw.load_secret("given") == "given"
+    (tmp_path / ".env").write_text("WEBHOOK_SECRET=from-env-file\n")
+    monkeypatch.setattr(rw, "ROOT", tmp_path)
+    assert rw.load_secret(None) == "from-env-file"
+    (tmp_path / ".env").write_text("OTHER=1\n")
+    with pytest.raises(SystemExit):
+        rw.load_secret(None)

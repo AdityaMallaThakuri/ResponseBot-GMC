@@ -21,6 +21,17 @@ DEFAULT_MIN_CONFIDENCE = 0.75
 DEFAULT_MIN_CONFIDENCE_NOT_INTERESTED = 0.90
 
 
+MIN_WEBHOOK_SECRET_LENGTH = 32
+
+
+def parse_campaign_ids(value: str) -> frozenset[int]:
+    """ "101, 102" -> {101, 102}. Blank means none. Raises ValueError on anything else."""
+    ids = [part.strip() for part in value.split(",") if part.strip()]
+    if not all(part.isdigit() for part in ids):
+        raise ValueError("must be comma-separated campaign ids, for example 101,102")
+    return frozenset(int(part) for part in ids)
+
+
 class ConfigError(RuntimeError):
     """Raised when required configuration is missing, blank or invalid."""
 
@@ -37,6 +48,9 @@ class Settings(BaseSettings):
     SEND_ENABLED: bool = False
     CATEGORY_WRITEBACK_ENABLED: bool = False
     WEBHOOK_SECRET: str
+    # Smartlead campaign ids the bot handles, comma separated (for example "101,102").
+    # Replies from any other campaign are ignored. Empty means every reply is ignored.
+    GMC_CAMPAIGN_IDS: str = ""
     # Model ids, checked against the Anthropic models docs on 2026-11-03.
     CLASSIFIER_MODEL: str = DEFAULT_MODEL
     DRAFT_LABEL_MODEL: str = DEFAULT_MODEL
@@ -72,6 +86,25 @@ class Settings(BaseSettings):
         if not 0 <= value <= 1:
             raise ValueError("must be between 0 and 1")
         return value
+
+    @field_validator("WEBHOOK_SECRET")
+    @classmethod
+    def _webhook_secret_is_long_enough(cls, value: str) -> str:
+        if value.strip() and len(value.strip()) < MIN_WEBHOOK_SECRET_LENGTH:  # blank: see below
+            raise PydanticCustomError(
+                "too_short", f"needs at least {MIN_WEBHOOK_SECRET_LENGTH} characters"
+            )
+        return value
+
+    @field_validator("GMC_CAMPAIGN_IDS")
+    @classmethod
+    def _campaign_ids_are_integers(cls, value: str) -> str:
+        parse_campaign_ids(value)
+        return value
+
+    @property
+    def gmc_campaign_ids(self) -> frozenset[int]:
+        return parse_campaign_ids(self.GMC_CAMPAIGN_IDS)
 
     @field_validator(*REQUIRED)
     @classmethod
