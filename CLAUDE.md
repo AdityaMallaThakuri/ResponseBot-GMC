@@ -18,6 +18,7 @@ Python 3.12, FastAPI, Slack Bolt, Supabase Postgres, Anthropic API (small model 
 - The template engine may only fill these slots: NAME, DAYTIMEORDAYTIME (two real CST slots from the calendar), links, and one vertical-specific "AI triggers" line. The validator rejects any draft that changes text outside those slots, states a price figure, or makes a claim that is not in the playbook.
 - Never invent a price, a case-study number, a time slot or a link. Use only what is in playbook.yaml and the calendar.
 - Anything uncertain (low classifier confidence, Smartlead category disagrees, off-script message, validator failure) goes to a human with no draft.
+- A model classification with confidence below CLASSIFIER_MIN_CONFIDENCE (default 0.75) goes to human_only with no draft. Rule-based results keep confidence 1.0, and a classifier error also goes to a human (`app/classify/confidence.py`).
 - Do-not-contact and bounce replies are suppressed automatically and never drafted.
 - Unsubscribe and not-interested replies are suppressed at campaign scope. A global unsubscribe happens only for explicit broad opt-outs (remove me from all lists, do not contact me again, legal threat, spam complaint), and only after a human confirms in Slack. The Smartlead client never goes global on its own. Suppressions record a scope (campaign, client, global).
 - Secrets only in .env. Never log full email bodies at INFO level outside Supabase.
@@ -25,6 +26,8 @@ Python 3.12, FastAPI, Slack Bolt, Supabase Postgres, Anthropic API (small model 
 
 ## Labels
 The label list lives in app/config/labels.yaml and is finalised in Phase B. Initial set: meeting_request, info_request, free_list_request, price_question, price_and_info, lead_magnet_request, trial_request, booked_confirmation, objection_info, objection_price, not_interested, wrong_person, out_of_office, auto_reply_or_bounce, do_not_contact, off_script.
+
+Classifier v1 (accepted 2026-11-03): deterministic rules first (unsubscribe/stop/remove me, Sendio verify-your-email, "no longer with"), then claude-haiku-5-5 via CLASSIFIER_MODEL with structured JSON output and prompt caching. Claude Haiku 5.5 rejects sampling parameters, so no temperature is sent. Held-out result on the 44 scored rows: 84.1% accuracy, do_not_contact recall 100%. The held-out set (`eval/data/holdout_ids.txt`) is not used for tuning.
 
 ## Playbook facts
 Offer: fractional deal origination for M&A firms. Calendar link: https://calendly.com/gamicmedia/one-one. Book in CST. Templates T1 to T8 and the objection handlers live in app/config/playbook.yaml, copied word for word from Gamic's M&A GMC reply playbook.

@@ -3,10 +3,14 @@
 Usage:
     python scripts/score_classifier.py                 # tuning set (the 150 rows you may look at)
     python scripts/score_classifier.py --holdout       # held-out set: run this once, at the end
+    python scripts/score_classifier.py --holdout --cached-only --groups-only
+                                                       # recompute from saved predictions only
 
 Prints overall accuracy, per-label precision and recall, a confusion matrix and
 do_not_contact recall. Rows marked unsure are left out of the numbers and counted.
 Gate (held-out set): 90% accuracy and 99% do_not_contact recall.
+A second report follows: accuracy by action group (see GROUPS) and what the confidence
+threshold (CLASSIFIER_MIN_CONFIDENCE, or --min-confidence) would send to a human.
 Predictions are cached in eval/data/classifier_cache.jsonl, keyed by thread_id and prompt
 version, so reruns only call the API for rows that are new or whose prompt changed.
 Every held-out run is appended to eval/reports/holdout_runs.log so peeking leaves a trail.
@@ -40,6 +44,20 @@ GATE_DNC_RECALL = 0.99
 UNSURE_MARKS = {"Y", "YES", "1", "TRUE", "X"}
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 ERROR = "(error)"
+
+# Action groups: labels that lead to the same kind of next step. Used by the second report.
+GROUPS: dict[str, tuple[str, ...]] = {
+    "list_or_doc": ("free_list_request", "lead_magnet_request"),
+    "info": ("info_request", "price_question", "price_and_info"),
+    "objection": ("objection_info", "objection_price"),
+    "decline": ("not_interested",),
+    "meeting": ("meeting_request", "trial_request", "booked_confirmation"),
+    "redirect": ("wrong_person",),
+    "auto": ("out_of_office", "auto_reply_or_bounce"),
+    "stop": ("do_not_contact",),
+    "other": ("off_script",),
+}
+GROUP_OF = {label: group for group, labels in GROUPS.items() for label in labels}
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -89,12 +107,26 @@ def load_cache(path: Path, version: str) -> dict[str, dict[str, Any]]:
     return cache
 
 
-def predict(rows: list[dict[str, Any]], classifier: Any, cache_path: Path, workers: int) -> dict:
-    """Prediction entry per thread_id. Calls the classifier only for rows not in the cache."""
+def predict(
+    rows: list[dict[str, Any]],
+    classifier: Any,
+    cache_path: Path,
+    workers: int,
+    cached_only: bool = False,
+) -> dict:
+    """Prediction entry per thread_id. Calls the classifier only for rows not in the cache.
+
+    With cached_only the classifier is never called: missing rows are an error.
+    """
     from app.classify.classifier import ClassifierError
 
     cache = load_cache(cache_path, classifier.version)
     todo = [r for r in rows if r["thread_id"] not in cache]
+    if cached_only and todo:
+        raise SystemExit(
+            f"{len(todo)} of {len(rows)} predictions are not saved for prompt version "
+            f"{classifier.version}. Run without --cached-only to classify them."
+        )
     lock = threading.Lock()
 
     def work(row: dict[str, Any]) -> None:
@@ -190,6 +222,14 @@ def mistakes(rows: list[dict[str, Any]], preds: dict, n: int) -> list[str]:
     return lines
 
 
+def accuracy_summary(rows: list[dict[str, Any]], preds: dict) -> dict[str, Any]:
+    """The numbers report() returns, without printing anything."""
+    scored = [r for r in rows if not r["unsure"]]
+    right, total = accuracy(scored, preds)
+    hit, dnc = dnc_recall(scored, preds)
+    return {"right": right, "total": total, "dnc_hit": hit, "dnc_total": dnc, "scored": scored}
+
+
 def report(rows: list[dict[str, Any]], preds: dict, title: str) -> dict[str, Any]:
     """Print the full report for one set. Unsure rows are excluded from every number."""
     scored = [r for r in rows if not r["unsure"]]
@@ -218,12 +258,108 @@ def gate(result: dict[str, Any]) -> bool:
     return ok_acc and ok_dnc
 
 
-def log_holdout_run(path: Path, version: str, result: dict[str, Any]) -> None:
+def group_of(label: str) -> str:
+    return GROUP_OF.get(label, ERROR)
+
+
+def group_rows(rows: list[dict[str, Any]], preds: dict) -> list[dict[str, Any]]:
+    """Rows with the human group and the predicted group added."""
+    return [
+        {
+            **r,
+            "human_group": group_of(r["human"]),
+            "pred_group": group_of(preds[r["thread_id"]]["label"]),
+        }
+        for r in rows
+    ]
+
+
+def sent_to_human(pred: dict[str, Any], min_confidence: float) -> bool:
+    """Would the confidence threshold send this prediction to human_only?"""
+    from app.classify.classifier import Classification
+    from app.classify.confidence import needs_human
+
+    result = Classification(
+        pred["label"], pred["confidence"], pred.get("reason", ""), pred["source"]
+    )
+    return pred["label"] == ERROR or needs_human(result, min_confidence)
+
+
+def group_table(rows: list[dict[str, Any]]) -> list[str]:
+    human = Counter(r["human_group"] for r in rows)
+    pred = Counter(r["pred_group"] for r in rows)
+    tp = Counter(r["human_group"] for r in rows if r["human_group"] == r["pred_group"])
+    lines = [f"{'group':12} {'human':>5} {'pred':>5} {'right':>5} {'precision':>9} {'recall':>8}"]
+    for group in [*GROUPS, ERROR]:
+        if human[group] or pred[group]:
+            lines.append(
+                f"{group:12} {human[group]:>5} {pred[group]:>5} {tp[group]:>5} "
+                f"{pct(tp[group], pred[group]):>9} {pct(tp[group], human[group]):>8}"
+            )
+    return lines
+
+
+def group_confusion(rows: list[dict[str, Any]]) -> list[str]:
+    cells = Counter((r["human_group"], r["pred_group"]) for r in rows)
+    groups = [g for g in [*GROUPS, ERROR] if any(g in pair for pair in cells)]
+    lines = [
+        f"{'':12}"
+        + "".join(f"{g[:8]:>9}" for g in groups)
+        + "   (rows = human, columns = predicted)"
+    ]
+    for h in groups:
+        counts = "".join(f"{cells[(h, p)] or '.':>9}" for p in groups)
+        lines.append(f"{h:12}{counts}")
+    return lines
+
+
+def threshold_report(rows: list[dict[str, Any]], preds: dict, min_confidence: float) -> list[str]:
+    """What the confidence threshold would do to these rows (rows must be the scored ones)."""
+    grouped = group_rows(rows, preds)
+    human = [r for r in grouped if sent_to_human(preds[r["thread_id"]], min_confidence)]
+    kept = [r for r in grouped if r not in human]
+    label_wrong = [r for r in grouped if preds[r["thread_id"]]["label"] != r["human"]]
+    group_wrong = [r for r in grouped if r["human_group"] != r["pred_group"]]
+    caught = [r for r in label_wrong if r in human]
+    caught_group = [r for r in group_wrong if r in human]
+    kept_label = sum(1 for r in kept if preds[r["thread_id"]]["label"] == r["human"])
+    kept_group = sum(1 for r in kept if r["human_group"] == r["pred_group"])
+    dnc = [r for r in grouped if r["human"] == "do_not_contact"]
+    dnc_auto = [r for r in dnc if r not in human and preds[r["thread_id"]]["label"] == r["human"]]
+    return [
+        f"Confidence threshold {min_confidence} (rule results score 1.0 and always pass):",
+        f"  sent to human_only: {len(human)} of {len(grouped)} ({pct(len(human), len(grouped))})",
+        f"  label mistakes caught: {len(caught)} of {len(label_wrong)}",
+        f"  group mistakes caught: {len(caught_group)} of {len(group_wrong)}",
+        f"  kept (not sent to a human): {len(kept)}; label accuracy {kept_label}/{len(kept)} "
+        f"({pct(kept_label, len(kept))}), group accuracy {kept_group}/{len(kept)} "
+        f"({pct(kept_group, len(kept))})",
+        f"  do_not_contact rows handled without a human and right: {len(dnc_auto)} of {len(dnc)}",
+    ]
+
+
+def group_report(
+    rows: list[dict[str, Any]], preds: dict, min_confidence: float, title: str
+) -> dict[str, Any]:
+    """Second report: accuracy by action group, then the confidence threshold. Unsure excluded."""
+    scored = [r for r in rows if not r["unsure"]]
+    grouped = group_rows(scored, preds)
+    right = sum(1 for r in grouped if r["human_group"] == r["pred_group"])
+    print(f"\n=== {title}: ACTION GROUPS ===")
+    print(f"Scored rows: {len(grouped)} (unsure excluded: {len(rows) - len(scored)})")
+    print(f"Group accuracy: {right}/{len(grouped)} = {pct(right, len(grouped))}")
+    print("\n" + "\n".join(group_table(grouped)))
+    print("\n" + "\n".join(group_confusion(grouped)))
+    print("\n" + "\n".join(threshold_report(scored, preds, min_confidence)))
+    return {"group_right": right, "total": len(grouped)}
+
+
+def log_holdout_run(path: Path, version: str, result: dict[str, Any], cached: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
     line = (
         f"{stamp} version={version} scored={result['total']} correct={result['right']} "
-        f"dnc={result['dnc_hit']}/{result['dnc_total']}\n"
+        f"dnc={result['dnc_hit']}/{result['dnc_total']}{' cached=1' if cached else ''}\n"
     )
     with path.open("a", encoding="utf-8") as f:
         f.write(line)
@@ -235,33 +371,48 @@ def main(argv: list[str]) -> int:
     p.add_argument("--mistakes", type=int, default=10, help="tuning set: how many to list")
     p.add_argument("--workers", type=int, default=8)
     p.add_argument("--model", help="override the CLASSIFIER_MODEL setting")
+    p.add_argument("--cached-only", action="store_true", help="never call the model")
+    p.add_argument("--groups-only", action="store_true", help="print only the action-group report")
+    p.add_argument("--min-confidence", type=float, help="override CLASSIFIER_MIN_CONFIDENCE")
     args = p.parse_args(argv)
-
-    import anthropic
 
     from app.classify.classifier import Classifier
     from app.config.settings import get_settings
 
     settings = get_settings()
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, max_retries=5)
+    if args.cached_only:
+        client = None  # the model is never called in this mode
+    else:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, max_retries=5)
     classifier = Classifier(client, args.model or settings.CLASSIFIER_MODEL)
+    min_confidence = (
+        args.min_confidence
+        if args.min_confidence is not None
+        else settings.CLASSIFIER_MIN_CONFIDENCE
+    )
 
     ids = {
         line.strip() for line in HOLDOUT.read_text(encoding="utf-8").splitlines() if line.strip()
     }
     rows = load_rows(read_csv(GOLD), ids, read_csv(SHEET), read_csv(DATASET), args.holdout)
     print(f"Model {classifier.model}, prompt version {classifier.version}")
-    preds = predict(rows, classifier, CACHE, args.workers)
+    preds = predict(rows, classifier, CACHE, args.workers, cached_only=args.cached_only)
+    title = "HELD-OUT SET" if args.holdout else "TUNING SET"
 
-    result = report(rows, preds, "HELD-OUT SET" if args.holdout else "TUNING SET")
+    result = accuracy_summary(rows, preds) if args.groups_only else report(rows, preds, title)
     if args.holdout:
-        log_holdout_run(HOLDOUT_LOG, classifier.version, result)
-        if not gate(result):
-            print("\nGate missed. Top 10 mistakes (most confident first):")
-            print("\n".join(mistakes(result["scored"], preds, 10)))
-    else:
-        print(f"\nTop {args.mistakes} mistakes (most confident first):")
-        print("\n".join(mistakes(result["scored"], preds, args.mistakes)))
+        log_holdout_run(HOLDOUT_LOG, classifier.version, result, cached=args.cached_only)
+    if not args.groups_only:
+        if args.holdout:
+            if not gate(result):
+                print("\nGate missed. Top 10 mistakes (most confident first):")
+                print("\n".join(mistakes(result["scored"], preds, 10)))
+        else:
+            print(f"\nTop {args.mistakes} mistakes (most confident first):")
+            print("\n".join(mistakes(result["scored"], preds, args.mistakes)))
+    group_report(rows, preds, min_confidence, title)
     return 0
 
 

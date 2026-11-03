@@ -9,3 +9,7 @@ __pycache__/
 # Real lead data and generated reports: never commit
 eval/data/
 eval/reports/
+
+# Local working files, not part of the project
+/draft_labels_by_claude.csv
+/merge_drafts.py

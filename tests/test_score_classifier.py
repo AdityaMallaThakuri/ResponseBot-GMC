@@ -161,3 +161,104 @@ def test_holdout_run_is_logged(tmp_path: Path) -> None:
     sc.log_holdout_run(log, "v2", {"total": 50, "right": 47, "dnc_hit": 6, "dnc_total": 6})
     lines = log.read_text().splitlines()
     assert len(lines) == 2 and "version=v1" in lines[0] and "dnc=6/6" in lines[1]
+    sc.log_holdout_run(
+        log, "v3", {"total": 50, "right": 40, "dnc_hit": 6, "dnc_total": 6}, cached=True
+    )
+    assert log.read_text().splitlines()[2].endswith("cached=1")
+
+
+# ------------------------------------------------------------------ action groups and threshold
+
+
+def test_groups_cover_every_label_exactly_once() -> None:
+    from app.classify.classifier import load_config
+
+    grouped = [label for labels in sc.GROUPS.values() for label in labels]
+    assert sorted(grouped) == sorted(load_config()["labels"])
+    assert len(grouped) == len(set(grouped))
+    assert sc.group_of("free_list_request") == "list_or_doc"
+    assert sc.group_of("booked_confirmation") == "meeting"
+    assert sc.group_of("off_script") == "other"
+    assert sc.group_of(sc.ERROR) == sc.ERROR
+
+
+def group_fixture() -> tuple[list[dict], dict]:
+    rows = [
+        row("a", "free_list_request"),  # predicted lead_magnet_request: label wrong, group right
+        row("b", "objection_price"),  # predicted not_interested at 0.8: group wrong, not caught
+        row("c", "objection_info"),  # predicted off_script at 0.5: group wrong, caught
+        row("d", "do_not_contact"),  # rule: right
+        row("e", "do_not_contact"),  # model at 0.6: right but sent to a human
+        row("f", "info_request"),  # right at 0.9
+        row("g", "info_request", unsure=True),  # excluded from every number
+    ]
+    preds = {
+        "a": pred("lead_magnet_request", 0.9),
+        "b": pred("not_interested", 0.8),
+        "c": pred("off_script", 0.5),
+        "d": pred("do_not_contact", 1.0, source="rule"),
+        "e": pred("do_not_contact", 0.6),
+        "f": pred("info_request", 0.9),
+        "g": pred("off_script", 0.1),
+    }
+    return rows, preds
+
+
+def test_group_accuracy_counts_same_group_confusions_as_right(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rows, preds = group_fixture()
+    result = sc.group_report(rows, preds, 0.75, "TEST")
+    out = capsys.readouterr().out
+    assert (result["group_right"], result["total"]) == (4, 6)
+    assert "Group accuracy: 4/6 = 66.7%" in out and "unsure excluded: 1" in out
+    assert "list_or_doc" in out and "objection" in out
+
+
+def test_threshold_report_counts_who_goes_to_a_human(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rows, preds = group_fixture()
+    sc.group_report(rows, preds, 0.75, "TEST")
+    out = capsys.readouterr().out
+    assert "sent to human_only: 2 of 6 (33.3%)" in out  # c (0.5) and e (0.6)
+    assert "label mistakes caught: 1 of 3" in out  # a, b, c are wrong; only c is caught
+    assert "group mistakes caught: 1 of 2" in out
+    assert "label accuracy 2/4 (50.0%)" in out and "group accuracy 3/4 (75.0%)" in out
+    assert "do_not_contact rows handled without a human and right: 1 of 2" in out
+
+
+def test_threshold_moves_with_the_setting() -> None:
+    rows, preds = group_fixture()
+    scored = [r for r in rows if not r["unsure"]]
+    low = "\n".join(sc.threshold_report(scored, preds, 0.4))
+    high = "\n".join(sc.threshold_report(scored, preds, 0.95))
+    assert "sent to human_only: 0 of 6" in low
+    assert "sent to human_only: 5 of 6" in high  # only the rule result (1.0) passes
+
+
+def test_sent_to_human_rules_and_errors() -> None:
+    assert not sc.sent_to_human(pred("do_not_contact", 1.0, source="rule"), 0.99)
+    assert sc.sent_to_human(pred("info_request", 0.74), 0.75)
+    assert not sc.sent_to_human(pred("info_request", 0.75), 0.75)
+    assert sc.sent_to_human(pred(sc.ERROR, 0.0), 0.0)
+
+
+def test_cached_only_never_calls_the_model(tmp_path: Path) -> None:
+    from app.classify.classifier import Classification
+
+    calls: list[str] = []
+
+    def classify(reply: str, campaign: str, outreach: str) -> Classification:
+        calls.append(reply)
+        return Classification("info_request", 0.8, "ok", "llm")
+
+    clf = SimpleNamespace(version="v1", classify=classify)
+    rows = [{**row("a", "x"), "reply": "r", "campaign": "c", "outreach": "o"}]
+    cache = tmp_path / "cache.jsonl"
+    with pytest.raises(SystemExit, match="not saved"):
+        sc.predict(rows, clf, cache, workers=1, cached_only=True)
+    assert calls == []
+    sc.predict(rows, clf, cache, workers=1)
+    assert sc.predict(rows, clf, cache, workers=1, cached_only=True)["a"]["label"] == "info_request"
+    assert len(calls) == 1

@@ -17,6 +17,7 @@ REQUIRED = (
 
 
 DEFAULT_MODEL = "claude-haiku-5-5"
+DEFAULT_MIN_CONFIDENCE = 0.75
 
 
 class ConfigError(RuntimeError):
@@ -38,6 +39,8 @@ class Settings(BaseSettings):
     # Model ids, checked against the Anthropic models docs on 2026-11-03.
     CLASSIFIER_MODEL: str = DEFAULT_MODEL
     DRAFT_LABEL_MODEL: str = DEFAULT_MODEL
+    # Below this model confidence the thread goes to a human with no draft. Rules score 1.0.
+    CLASSIFIER_MIN_CONFIDENCE: float = DEFAULT_MIN_CONFIDENCE
     # Slack channels (name or id). Optional until the step that posts to them is built.
     SLACK_DRAFT_CHANNEL: str | None = None
     SLACK_LOG_CHANNEL: str | None = None
@@ -49,6 +52,18 @@ class Settings(BaseSettings):
     @classmethod
     def _blank_model_is_default(cls, value: object) -> object:
         return DEFAULT_MODEL if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("CLASSIFIER_MIN_CONFIDENCE", mode="before")
+    @classmethod
+    def _blank_confidence_is_default(cls, value: object) -> object:
+        return DEFAULT_MIN_CONFIDENCE if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("CLASSIFIER_MIN_CONFIDENCE")
+    @classmethod
+    def _confidence_in_range(cls, value: float) -> float:
+        if not 0 <= value <= 1:
+            raise ValueError("must be between 0 and 1")
+        return value
 
     @field_validator(*REQUIRED)
     @classmethod
