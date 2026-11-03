@@ -101,6 +101,7 @@ def test_get_thread_returns_clean_ordered_messages() -> None:
     assert thread.messages[1].text == "Sounds interesting, can you send times?"
     assert thread.messages[1].timestamp.isoformat() == "2026-10-20T14:00:00+00:00"
     # the reply target is the stats_id of the lead's latest reply
+    assert [m.message_id for m in thread.messages][1] == "<reply-1@example.com>"
     assert thread.reply_to_stats_id == "11111111-aaaa-4aaa-8aaa-000000000001"
     assert thread.to_email == "jane@example.com"
 

@@ -61,6 +61,9 @@ def _entry(**overrides: object) -> dict:
         "type": "SENT",
         "time": "2026-10-01T10:00:00.000Z",
         "email_body": "a",
+        "message_id": "<m1@example.com>",
+        "from": "ray@gamicmedia.example",
+        "to": "jane@example.com",
     }
     return {**entry, **overrides}
 
@@ -76,6 +79,32 @@ def test_parse_thread_sorts_oldest_first_and_keeps_stats_id() -> None:
     assert [m.text for m in messages] == ["a", "b"]
     assert [m.direction.value for m in messages] == ["SENT", "REPLY"]
     assert [m.stats_id for m in messages] == ["s1", "s2"]
+
+
+def test_parse_thread_reads_message_id_and_addresses() -> None:
+    entry = _entry(**{"message_id": "<abc@x>", "from": "a@x.com", "to": "b@x.com"})
+    (message,) = parse_thread({"history": [entry]})
+    assert (message.message_id, message.from_addr, message.to_addr) == (
+        "<abc@x>",
+        "a@x.com",
+        "b@x.com",
+    )
+
+
+def test_real_fixtures_carry_message_ids_and_addresses() -> None:
+    history = json.loads((FIXTURES / "message_history.json").read_text())
+    messages = parse_thread(history)
+    assert [m.message_id for m in messages] == [
+        "<msg-1@gamicmedia.example>",
+        "<reply-1@example.com>",
+        "<msg-2@gamicmedia.example>",
+    ]
+    assert messages[1].from_addr == "jane@example.com"
+    assert messages[1].to_addr == "ray@gamicmedia.example"
+
+
+def _without(key: str) -> dict:
+    return {k: v for k, v in _entry().items() if k != key}
 
 
 def test_parse_thread_accepts_inbox_item_email_history() -> None:
@@ -100,6 +129,13 @@ def test_latest_reply_stats_id_none_without_reply() -> None:
         {"history": [{k: v for k, v in _entry().items() if k != "stats_id"}]},
         {"history": [{k: v for k, v in _entry().items() if k != "email_body"}]},
         {"history": [_entry(time="yesterday")]},
+        {"history": [_without("message_id")]},
+        {"history": [_without("from")]},
+        {"history": [_without("to")]},
+        {"history": [_entry(message_id="   ")]},
+        {"history": [_entry(message_id=None)]},
+        {"history": [_entry(message_id=12345)]},
+        {"history": [_entry(**{"from": ""})]},
     ],
 )
 def test_parse_thread_raises_on_unexpected_shape(payload: object) -> None:

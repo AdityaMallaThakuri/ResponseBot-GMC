@@ -24,6 +24,14 @@ def _field(entry: dict[str, Any], key: str) -> Any:
     return entry[key]
 
 
+def _text_field(entry: dict[str, Any], key: str) -> str:
+    """A required identifier: present, a string, and not blank."""
+    value = _field(entry, key)
+    if not isinstance(value, str) or not value.strip():
+        raise ParseError(f"message entry has a blank or non-text {key!r}")
+    return value
+
+
 def _direction(entry: dict[str, Any]) -> Direction:
     raw = _field(entry, "type")
     try:
@@ -53,6 +61,9 @@ def parse_thread(payload: Any) -> list[Message]:
             timestamp=_timestamp(entry),
             text=clean_body(str(_field(entry, "email_body"))),
             stats_id=str(_field(entry, "stats_id")),
+            message_id=_text_field(entry, "message_id"),
+            from_addr=_text_field(entry, "from"),
+            to_addr=_text_field(entry, "to"),
         )
         for entry in entries
     ]

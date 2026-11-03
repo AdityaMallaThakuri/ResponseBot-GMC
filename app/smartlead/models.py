@@ -16,6 +16,10 @@ class Message:
     timestamp: datetime
     text: str
     stats_id: str
+    # the email Message-ID header; with direction and time it identifies a message
+    message_id: str
+    from_addr: str
+    to_addr: str
 
 
 @dataclass(frozen=True)

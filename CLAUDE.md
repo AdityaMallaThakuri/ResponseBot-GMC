@@ -36,8 +36,21 @@ Rate limit 120 requests per minute per key, handle 429 with backoff. Master-inbo
 - `reply_to_stats_id` is the `stats_id` of the lead's latest REPLY. This is unverified until the first approved staging send.
 - Category write-back is off (`CATEGORY_WRITEBACK_ENABLED=false`, and it also needs `SEND_ENABLED`). It is limited to `reply_label` categories in `app/config/smartlead_categories.yaml`; workflow triggers ("Generate ..." and Find Phone Number) and unknown categories are never written. The per-lead category endpoint (method and path) is unverified and not implemented.
 
+## Data model
+Supabase Postgres. SQL lives in db/migrations (numbered, applied in order by hand, see docs/apply_migrations.md); `python scripts/check_schema.py` validates them against this section.
+Tables: raw_events, threads, messages, classifications, qualifications, drafts, slack_cards, actions, suppressions, retry_queue, eval_results, decisions, gold_labels.
+- Every table has a uuid primary key and created_at. Row level security is on with no policies: only the service key reads or writes.
+- `stats_id` is NOT unique per message (a SENT and its REPLY can share one). `messages` is unique on (thread_id, direction, sent_at, message_id), so a replayed webhook never duplicates or drops a message.
+- `threads` is unique on (email_lead_id, email_campaign_id). `raw_events` is unique on (source, payload_hash).
+- A draft that failed the validator can only be skipped or failed, never approved or sent.
+- `decisions` holds the one human decision per draft (unique on draft_id, so the first Slack click wins): approved, edited or skipped, with skip_reason, final_text, edit_distance_pct and the sent message. `gold_labels` holds human labels (message type, verdict, template T1 to T8) per thread and labeler, for the eval replay.
+- `drafts.template_version` records which version of playbook.yaml produced a draft. `classifications.extracted_facts` holds structured facts from a reply (out-of-office return date, referred contact). `threads.vertical` holds the lead's vertical.
+- Decision: no templates table and no events table. Templates stay in app/config/playbook.yaml, and git is their version history; raw_events already records every incoming payload.
+- Every new table's migration must also enable RLS and revoke anon and authenticated access; `scripts/check_schema.py` fails otherwise.
+- Suppressions keep scope (campaign, client, global) with CHECK constraints; global needs confirmed_by.
+
 ## Code layout
-app/ (main.py, config/, ingest/, classify/, qualify/, templates/, validate/, slack/, smartlead/, db/), eval/ (gold set and replay script), tests/, scripts/, Dockerfile, README.md.
+app/ (main.py, config/, ingest/, classify/, qualify/, templates/, validate/, slack/, smartlead/, db/), db/migrations (SQL), docs/, eval/ (gold set and replay script), tests/, scripts/, Dockerfile, README.md.
 
 ## Working agreements
 - Show a plan before writing code. Keep changes small and focused on the current step.
