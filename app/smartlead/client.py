@@ -3,14 +3,15 @@ import random
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import httpx
 
 from app.config.settings import Settings
 from app.db.suppressions import SuppressionScope
-from app.smartlead.errors import SendDisabledError, SmartleadError
+from app.smartlead.categories import Category, CategoryKind, load_categories
+from app.smartlead.errors import CategoryWriteRefused, SendDisabledError, SmartleadError
 from app.smartlead.models import Lead, Thread, UnsubscribeResult
 from app.smartlead.thread import latest_reply_stats_id, parse_thread
 
@@ -61,6 +62,8 @@ class SmartleadClient:
         api_key: str,
         *,
         send_enabled: bool = False,
+        category_writeback_enabled: bool = False,
+        categories: Mapping[int, Category] | None = None,
         requests_per_minute: int = 120,
         base_url: str = BASE_URL,
         transport: httpx.BaseTransport | None = None,
@@ -70,6 +73,8 @@ class SmartleadClient:
     ) -> None:
         self._api_key = api_key
         self._send_enabled = send_enabled
+        self._category_writeback_enabled = category_writeback_enabled
+        self._categories = categories if categories is not None else load_categories()
         self._sleep = sleep
         self._jitter = jitter
         self._limiter = RateLimiter(requests_per_minute, 60.0, clock, sleep)
@@ -77,7 +82,11 @@ class SmartleadClient:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "SmartleadClient":
-        return cls(settings.SMARTLEAD_API_KEY, send_enabled=settings.SEND_ENABLED)
+        return cls(
+            settings.SMARTLEAD_API_KEY,
+            send_enabled=settings.SEND_ENABLED,
+            category_writeback_enabled=settings.CATEGORY_WRITEBACK_ENABLED,
+        )
 
     def close(self) -> None:
         self._http.close()
@@ -210,6 +219,22 @@ class SmartleadClient:
         self._request("POST", f"/campaigns/{lead.campaign_id}/leads/{lead.lead_id}/pause")
 
     def update_lead_category(self, lead: Lead, category_id: int) -> None:
+        """Write a reply-label category back to Smartlead.
+
+        Refused, before any HTTP call, unless SEND_ENABLED and CATEGORY_WRITEBACK_ENABLED are
+        both on and the category is a reply_label. Workflow triggers and unknown categories
+        are never written: they can fire Smartlead automations.
+        """
+        category = self._categories.get(category_id)
+        if category is None or category.kind is not CategoryKind.REPLY_LABEL:
+            kind = category.kind.value if category else "not in smartlead_categories.yaml"
+            raise CategoryWriteRefused(
+                f"category {category_id} is not a reply_label ({kind}); refusing to write it"
+            )
+        if not self._send_enabled:
+            raise CategoryWriteRefused("SEND_ENABLED is false; refusing category write-back")
+        if not self._category_writeback_enabled:
+            raise CategoryWriteRefused("CATEGORY_WRITEBACK_ENABLED is false; refusing write-back")
         method, path, body = _build_category_request(lead, category_id)
         self._request(method, path, json=body)
 
@@ -217,7 +242,14 @@ class SmartleadClient:
 def _build_category_request(lead: Lead, category_id: int) -> tuple[str, str, dict[str, Any]]:
     """Return (method, path, body) for assigning a category to a lead.
 
-    ISOLATED: endpoint details are not yet confirmed from the Smartlead docs.
+    Known parameters only:
+    - per-campaign update: campaign_id, lead_id, category_id (null clears it) and an
+      optional pause_lead.
+    - master-inbox update: email_lead_map_id and category_id.
+
+    The HTTP method and path are UNVERIFIED. Smartlead's current docs do not document a
+    per-lead assignment endpoint. Do not implement this from a third-party guess; fill it in
+    only from an official Smartlead page or a confirmed real response.
     """
     raise NotImplementedError(
         "update_lead_category endpoint not confirmed; fill in _build_category_request"

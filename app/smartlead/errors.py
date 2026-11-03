@@ -6,5 +6,9 @@ class SendDisabledError(SmartleadError):
     """send_reply was called while SEND_ENABLED is false."""
 
 
+class CategoryWriteRefused(SmartleadError):
+    """update_lead_category was refused before any HTTP call."""
+
+
 class ParseError(SmartleadError):
     """A Smartlead payload did not have the expected shape."""

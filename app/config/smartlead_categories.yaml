@@ -1,0 +1,34 @@
+# Smartlead lead categories (account-specific ids).
+# kind:
+#   reply_label      the bot may write these back to Smartlead
+#   workflow_trigger the bot must NEVER write these (they fire Smartlead automations)
+#   unknown          treated like workflow_trigger until confirmed
+categories:
+  - {id: 1, name: Interested, kind: reply_label}
+  - {id: 2, name: Meeting Request, kind: reply_label}
+  - {id: 3, name: Not Interested, kind: reply_label}
+  - {id: 4, name: Do Not Contact, kind: reply_label}
+  - {id: 5, name: Information Request, kind: reply_label}
+  - {id: 6, name: Out Of Office, kind: reply_label}
+  - {id: 7, name: Wrong Person, kind: reply_label}
+  - {id: 8, name: Uncategorizable by Ai, kind: reply_label}
+  - {id: 9, name: Sender Originated Bounce, kind: reply_label}
+  - {id: 1589, name: requested pricing, kind: reply_label}
+  - {id: 1995, name: positive response but no reply, kind: reply_label}
+  - {id: 96272, name: Booked, kind: reply_label}
+  - {id: 100396, name: No-Show, kind: reply_label}
+  - {id: 157189, name: Disqualified, kind: reply_label}
+  - {id: 157190, name: Automated Response, kind: reply_label}
+
+  - {id: 95974, name: Find Phone Number, kind: workflow_trigger}
+  - {id: 113794, name: Generate Lead magnet, kind: workflow_trigger}
+  - {id: 126961, name: Generate Accounting Lead Magnet, kind: workflow_trigger}
+  - {id: 131581, name: Generater SAAS Lead Magnet, kind: workflow_trigger}
+  - {id: 131680, name: Generate SEO Lead Magnet, kind: workflow_trigger}
+  - {id: 134584, name: Generate BSM PI Lead Magnet, kind: workflow_trigger}
+  - {id: 144352, name: Generate M&A Lead Magnet, kind: workflow_trigger}
+  - {id: 170257, name: Generate Rework Lead Magnet, kind: workflow_trigger}
+  - {id: 185019, name: Generate reddit Report, kind: workflow_trigger}
+
+  - {id: 98680, name: PR Last 2 Weeks, kind: unknown}
+  - {id: 118216, name: Lead Magnet Follow Up, kind: unknown}

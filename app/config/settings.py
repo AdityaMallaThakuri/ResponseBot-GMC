@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_SERVICE_KEY: str
     SEND_ENABLED: bool = False
+    CATEGORY_WRITEBACK_ENABLED: bool = False
     WEBHOOK_SECRET: str
 
 

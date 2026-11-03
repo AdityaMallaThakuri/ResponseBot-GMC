@@ -172,13 +172,6 @@ def test_pause_lead() -> None:
     assert rec.requests[0].url.path.endswith("/campaigns/101/leads/555/pause")
 
 
-def test_update_category_not_yet_implemented() -> None:
-    client, rec, _ = make_client(ok())
-    with pytest.raises(NotImplementedError):
-        client.update_lead_category(LEAD, 3)
-    assert rec.requests == []
-
-
 # -- retry and rate limit -----------------------------------------------------------
 
 

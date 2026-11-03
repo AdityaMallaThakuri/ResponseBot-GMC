@@ -31,6 +31,10 @@ Offer: fractional deal origination for M&A firms. Calendar link: https://calendl
 
 ## Smartlead facts
 Rate limit 120 requests per minute per key, handle 429 with backoff. Master-inbox fetch: campaign ids max 5, limit max 20, page with offset. Thread text needs the message-history call. Smartlead category tags are a hint only; the bot classifies for itself.
+- Inbox response shape (verified on real data): `{"ok": true, "data": [items], "offset", "limit"}`. Each item has `email_lead_id` and `email_lead_map_id` (strings), `email_campaign_id` (int), `lead_email`, and its history under `email_history`. The message-history route returns the same entries under `history`.
+- Each history entry has `type` (`SENT` or `REPLY`), `time` (ISO), `email_body` (HTML, must be cleaned), and `stats_id`. The parser raises on any other shape.
+- `reply_to_stats_id` is the `stats_id` of the lead's latest REPLY. This is unverified until the first approved staging send.
+- Category write-back is off (`CATEGORY_WRITEBACK_ENABLED=false`, and it also needs `SEND_ENABLED`). It is limited to `reply_label` categories in `app/config/smartlead_categories.yaml`; workflow triggers ("Generate ..." and Find Phone Number) and unknown categories are never written. The per-lead category endpoint (method and path) is unverified and not implemented.
 
 ## Code layout
 app/ (main.py, config/, ingest/, classify/, qualify/, templates/, validate/, slack/, smartlead/, db/), eval/ (gold set and replay script), tests/, scripts/, Dockerfile, README.md.
