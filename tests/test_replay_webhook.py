@@ -93,3 +93,43 @@ def test_secret_comes_from_the_argument_or_dotenv(
     (tmp_path / ".env").write_text("OTHER=1\n")
     with pytest.raises(SystemExit):
         rw.load_secret(None)
+
+
+# ------------------------------------------------------------------ end to end with --check
+
+
+def test_a_replayed_fixture_goes_all_the_way_to_a_slack_card(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.test_c2 import FakeClassifier, FakeSlack, llm, make_deps
+
+    for key, value in GOOD_VALUES.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("GMC_CAMPAIGN_IDS", "101")
+    get_settings.cache_clear()
+    db = FakeDb()
+    deps = make_deps(db, FakeClassifier(llm("meeting_request", 0.9)), FakeSlack())
+    app.state.ingest = deps
+    try:
+        client = TestClient(app)
+        response = rw.replay(PATH, rw.DEFAULT_FIXTURE, SECRET, client=client)
+        assert response.json() == {"status": "accepted"}
+        assert len(db.tables["classifications"]) == 1 and len(deps.slack.posts) == 1
+        lines = rw.check(db=db, sleep=lambda s: None)
+    finally:
+        del app.state.ingest
+        get_settings.cache_clear()
+    text = "\n".join(lines)
+    assert "event: processed=True, process_error=none" in text
+    assert "classification: meeting_request at 0.9" in text and "prompt version v-test" in text
+    assert "slack card: lane human_only, status posted, channel C0TEST" in text
+    assert "@" not in text  # no email text
+
+
+def test_check_stops_waiting_when_the_event_never_finishes() -> None:
+    db = FakeDb()
+    db.tables["raw_events"] = [{"id": "e1", "processed": False, "created_at": "1"}]
+    sleeps: list[float] = []
+    lines = rw.check(wait=3.0, db=db, sleep=sleeps.append)
+    assert len(sleeps) == 3 and lines[0] == "event: processed=False, process_error=none"
+    assert "classification: none" in lines and "slack card: none" in lines

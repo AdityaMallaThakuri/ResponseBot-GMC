@@ -26,6 +26,7 @@ from app.db.client import (
     upsert_thread,
 )
 from app.db.records import NewMessage, NewThread
+from app.ingest.classify_step import StepError, handle_first_reply
 from app.ingest.deps import IngestDeps
 from app.smartlead.errors import ParseError, SmartleadError
 from app.smartlead.models import Direction, Lead, Message
@@ -55,6 +56,7 @@ class Outcome:
     status: str
     thread_id: str | None = None
     detail: str | None = None
+    classified: bool = False  # C2: this event classified the first reply and posted a card
 
 
 def _to_int(value: Any) -> int | None:
@@ -159,8 +161,21 @@ def process_reply_event(deps: IngestDeps, event_id: str, payload: dict[str, Any]
 
     prior_replies = _prior_reply_count(deps, lead.lead_id, lead.campaign_id)
     thread = upsert_thread(deps.db, build_thread(lead, item, payload, messages))
-    for message in messages:
-        insert_message(deps.db, NewMessage.from_message(thread["id"], message))
+    stored = [
+        (message, insert_message(deps.db, NewMessage.from_message(thread["id"], message)).row)
+        for message in messages
+    ]
+
+    classified = False
+    if deps.classifier is not None and deps.slack is not None:
+        try:
+            classified = handle_first_reply(deps, thread, stored, payload)
+        except StepError as exc:
+            return _fail_for_retry(deps, event_id, str(exc))
+        except Exception as exc:  # noqa: BLE001 - keep the event so the step can be retried
+            return _fail_for_retry(
+                deps, event_id, f"classify or Slack step failed: {type(exc).__name__}"
+            )
     mark_event_processed(deps.db, event_id, deps.clock())
 
     status = FIRST_REPLY if prior_replies == 0 else FOLLOW_UP
@@ -171,4 +186,4 @@ def process_reply_event(deps: IngestDeps, event_id: str, payload: dict[str, Any]
         len(messages),
         status,
     )
-    return Outcome(status, thread_id=thread["id"])
+    return Outcome(status, thread_id=thread["id"], classified=classified)

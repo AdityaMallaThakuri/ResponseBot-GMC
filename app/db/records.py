@@ -70,6 +70,8 @@ class ActionType(StrEnum):
     IGNORE = "ignore"
     SEND = "send"
     UNDO = "undo"
+    # recorded instead of SUPPRESS while sending is off: nothing reached Smartlead
+    WOULD_SUPPRESS = "would_suppress"
 
 
 class Decision(StrEnum):

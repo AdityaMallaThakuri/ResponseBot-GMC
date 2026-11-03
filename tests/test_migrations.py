@@ -30,11 +30,12 @@ def code() -> str:
 
 
 def check_values(constraint: str) -> set[str]:
-    match = re.search(
+    # the last definition wins: a later migration may drop and re-add a constraint
+    matches = re.findall(
         rf"constraint {constraint}\s+check \(\s*\w+ in \((.*?)\)\s*\)", sql(), re.DOTALL
     )
-    assert match, f"constraint {constraint} not found"
-    return set(re.findall(r"'([^']+)'", match.group(1)))
+    assert matches, f"constraint {constraint} not found"
+    return set(re.findall(r"'([^']+)'", matches[-1]))
 
 
 def values_of(enum: type[StrEnum]) -> set[str]:

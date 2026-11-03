@@ -353,3 +353,8 @@ def insert_eval_result(db: Database, result: NewEvalResult) -> Row:
 
 def fetch_eval_results(db: Database, limit: int = 20) -> list[Row]:
     return _select(db, "eval_results", order="created_at", desc=True, limit=limit)
+
+
+def find_slack_card(db: Database, channel: str, slack_ts: str) -> Row | None:
+    """The card a Slack message belongs to: a message is identified by channel id and ts."""
+    return _first(db, "slack_cards", {"channel": channel, "slack_ts": slack_ts})

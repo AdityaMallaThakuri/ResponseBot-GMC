@@ -41,6 +41,7 @@ class Classification:
     reason: str
     source: str  # "rule" or "llm"
     usage: dict[str, int] | None = None
+    rule_hit: str | None = None  # name of the rule that decided it, for rule results
 
 
 # --------------------------------------------------------------------------- rules
@@ -91,9 +92,9 @@ def clean_reply(reply: str) -> str:
 
 def apply_rules(reply: str) -> Classification | None:
     """A label for the obvious cases, or None to let the model decide. Reply must be cleaned."""
-    for _name, pattern, label, reason in RULES:
+    for name, pattern, label, reason in RULES:
         if pattern.search(reply):
-            return Classification(label, 1.0, reason, "rule")
+            return Classification(label, 1.0, reason, "rule", rule_hit=name)
     return None
 
 

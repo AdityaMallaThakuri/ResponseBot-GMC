@@ -13,3 +13,7 @@ eval/reports/
 # Local working files, not part of the project
 /draft_labels_by_claude.csv
 /merge_drafts.py
+
+# Fixtures built from real lead data: never commit
+/tests/fixtures/webhook_lender_reply.json
+/tests/fixtures/real_shapes.json

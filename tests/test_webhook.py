@@ -456,20 +456,17 @@ def test_a_crash_in_the_background_task_is_recorded(
 # ------------------------------------------------------------------ guard rails
 
 
-def test_ingest_only_reads_from_smartlead_and_never_touches_slack_or_the_classifier() -> None:
-    forbidden = (
-        "send_reply",
-        "unsubscribe_lead",
-        "pause_lead",
-        "app.slack",
-        "app.classify",
-        "anthropic",
-        "set_category",
-    )
-    for module in (webhook_module, process_module, deps_module):
+def test_ingest_only_reads_from_smartlead() -> None:
+    """Nothing in ingest may send, unsubscribe, pause or write a category in Smartlead."""
+    from app.ingest import classify_step as classify_step_module
+
+    forbidden = ("send_reply", "unsubscribe_lead", "pause_lead", "set_category", "suppress_lead")
+    for module in (webhook_module, process_module, deps_module, classify_step_module):
         source = Path(module.__file__).read_text(encoding="utf-8")
         for word in forbidden:
             assert word not in source, f"{module.__name__} mentions {word}"
+    # C2 makes no Smartlead call at all: only C1's process module touches the client.
+    assert "deps.smartlead" not in Path(classify_step_module.__file__).read_text(encoding="utf-8")
 
 
 # ------------------------------------------------------------------ settings and client
