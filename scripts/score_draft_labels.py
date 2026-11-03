@@ -78,6 +78,13 @@ def is_complete(r: dict[str, str]) -> bool:
     return bool(r["human_message_type"].strip() and r["human_verdict"].strip())
 
 
+UNSURE_MARKS = {"Y", "YES", "1", "TRUE", "X"}
+
+
+def is_unsure(row: dict[str, str]) -> bool:
+    return row["unsure"].strip().upper() in UNSURE_MARKS
+
+
 def pct(n: int, total: int) -> str:
     return f"{n / total * 100:.1f}%" if total else "n/a"
 
@@ -113,7 +120,7 @@ def label_table(rows: list[dict[str, str]]) -> list[str]:
 def field_report(rows: list[dict[str, str]], name: str, draft: str, human: str) -> list[str]:
     agreed, total = agreement(rows, draft, human)
     lines = [f"{name}: {agreed}/{total} agree ({pct(agreed, total)})"]
-    unsure = [r for r in rows if r["unsure"].strip().upper() != "Y"]
+    unsure = [r for r in rows if not is_unsure(r)]
     a2, t2 = agreement(unsure, draft, human)
     lines.append(f"  excluding rows marked unsure: {a2}/{t2} ({pct(a2, t2)})")
     pairs = Counter(
@@ -178,7 +185,7 @@ def main(argv: list[str]) -> int:
         print(f"  {started - len(filled)} rows have a label but no verdict and are skipped.")
     if not filled:
         return 1
-    print(f"Marked unsure: {sum(1 for r in filled if r['unsure'].strip().upper() == 'Y')}")
+    print(f"Marked unsure: {sum(1 for r in filled if is_unsure(r))}")
     print("Sample is stratified, so these figures are not accuracy over all threads.\n")
 
     print(

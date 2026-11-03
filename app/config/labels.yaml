@@ -6,9 +6,11 @@
 labels:
   meeting_request:
     template: T1
-    definition: The lead asks for a call or says "sure, let's talk", or proposes a time to talk.
+    definition: >-
+      The lead asks for a call or says "sure, let's talk", without fixing a specific day and
+      time. Once the reply names a specific day and time, it is booked_confirmation.
     examples:
-      - "Sure, happy to hop on a call. Do you have time Thursday afternoon?"
+      - "Sure, happy to hop on a call. What does your calendar look like?"
       - "Let's set up a quick intro call next week."
   info_request:
     template: T2
@@ -48,7 +50,10 @@ labels:
       - "Could we start with the free trial first?"
   booked_confirmation:
     template: T8
-    definition: The lead confirms a booked time, accepts an invite, or says they booked a slot.
+    definition: >-
+      The lead confirms a booked time, accepts an invite, says they booked a slot, says a time
+      is set, says they are on the call, or picks a specific day and time ("Wednesday 12:30pm
+      works for me").
     examples:
       - "I just booked a time on your calendar, talk soon."
       - "Confirmed for Tuesday, thanks."
@@ -57,15 +62,18 @@ labels:
     definition: >-
       The lead pushes back with a question the playbook has an answer for: how do you find
       transition-ready owners (T2a), we already have a broker network or deal flow team (T2b),
-      or how discreet is the outreach (T2c). Not about price.
+      or how discreet is the outreach (T2c). Also doubts and track-record questions: who are you,
+      how many clients like me have you worked with, can you really find sellers in my sector.
+      Not about price.
     examples:
       - "We already work with a network of brokers. Why would we need this?"
       - "How do you keep the outreach discreet for owners?"
   objection_price:
     template: T4a or T4b
     definition: >-
-      The lead objects to the price (that is more than we expected, T4a) or asks for a trial or
-      shorter commitment after hearing about price (T4b).
+      The lead objects to the price (that is more than we expected, T4a), says they cannot afford
+      it or will only pay on results, or asks for a trial or shorter commitment after hearing
+      about price (T4b). A plain "what does it cost" is price_question.
     examples:
       - "That is more than we expected to spend."
       - "Can we do a shorter commitment before signing up for the full term?"
@@ -122,12 +130,18 @@ rules:
       Label the FIRST prospect reply only. Later messages in the thread are context and must
       never change the label of the first reply.
     - >-
-      Temporary absence (out of office, vacation, "back on <date>", even if it names a
-      colleague) -> out_of_office.
+      Temporary absence (out of office, vacation, "back on <date>", "I am not available right
+      now", even if it names a colleague or gives no return date) -> out_of_office.
     - >-
-      Permanent departure ("no longer with the company") or "this address is no longer
-      monitored/used" with a named replacement or new address -> wrong_person (a referral),
-      even when sent automatically.
+      Permanent departure ("no longer with the company", retired, stepped back) or "this
+      address is no longer monitored/used" that gives a replacement person or new address ->
+      wrong_person (a referral), even when sent automatically.
+    - >-
+      A brief decline in any wording ("we're all set", "no thanks", "not for us") is
+      not_interested, even without the word interested.
+    - >-
+      An automatic notice that an address is no longer in service, whose only addresses are for
+      invoices or support, is auto_reply_or_bounce, not a referral.
     - >-
       Generic automatic messages (ticket acknowledgements, delivery notices, bounces) ->
       auto_reply_or_bounce.
@@ -136,7 +150,10 @@ rules:
       of targets and the lead says yes or "send it" -> free_list_request (T3). If it offered a
       document, guide, strategy doc, report or case study and the lead says yes or "send it" ->
       lead_magnet_request (T6). A general "tell me more" or "how does it work" is info_request
-      (T2).
+      (T2). Any short acceptance of what the outreach offered ("sure", "sounds good", "I will
+      take a look", "send it over", "shoot it over") counts as yes, even with no other words.
+      Curiosity about how it works or how we found them, with no doubt in it, is info_request;
+      doubt about us or our results is objection_info.
   verdict:
     - >-
       The lead_verdict is relative to the campaign. The target audience is whatever the outreach

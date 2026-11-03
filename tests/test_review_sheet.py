@@ -252,3 +252,9 @@ def test_scoring_with_nothing_filled_exits_cleanly(tmp_path: Path) -> None:
     args = scoring_files(tmp_path, [("t1", "", "", "")])
     assert sc.main(args) == 1
     assert not (tmp_path / "gold.csv").exists()
+
+
+@pytest.mark.parametrize("mark", ["Y", "y", "1", "yes"])
+def test_unsure_accepts_the_marks_labelers_use(mark: str) -> None:
+    assert sc.is_unsure({"unsure": mark})
+    assert not sc.is_unsure({"unsure": ""})
