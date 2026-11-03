@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 
 from app.classify.classifier import Classification
-from app.classify.routing import LANE_WOULD_SUPPRESS, Route, route
+from app.classify.routing import LANE_DRAFT, LANE_WOULD_SUPPRESS, Route, route
 from app.db.client import (
     Row,
     fetch_actions,
@@ -37,6 +37,7 @@ from app.db.records import (
     NewSlackCard,
 )
 from app.ingest.deps import IngestDeps
+from app.ingest.draft_step import DraftView, draft_enabled, prepare_draft
 from app.slack.card import ReplyCard, post_reply_card
 from app.smartlead.models import Direction, Message
 
@@ -76,8 +77,8 @@ def _classify(
 
 def _store_classification(
     deps: IngestDeps, thread: Row, reply_row: Row, result: Classification
-) -> None:
-    insert_classification(
+) -> Row:
+    return insert_classification(
         deps.db,
         NewClassification(
             thread_id=thread["id"],
@@ -116,7 +117,12 @@ def _record_would_suppress(deps: IngestDeps, thread_id: str, result: Classificat
 
 
 def _card(
-    thread: Row, payload: dict[str, Any], reply: Message, result: Classification | None, plan: Route
+    thread: Row,
+    payload: dict[str, Any],
+    reply: Message,
+    result: Classification | None,
+    plan: Route,
+    view: DraftView | None = None,
 ) -> ReplyCard:
     return ReplyCard(
         thread_ref=thread["id"],
@@ -130,6 +136,11 @@ def _card(
         reason=result.reason if result else plan.reason,
         note=plan.note,
         buttons=plan.buttons,
+        draft_text=view.text if view else None,
+        template_id=view.template_id if view else None,
+        draft_edited=view.edited if view else False,
+        draft_notes=view.notes if view else (),
+        approve_allowed=view.approve_allowed if view else True,
     )
 
 
@@ -157,17 +168,26 @@ def handle_first_reply(
         for c in fetch_classifications(deps.db, thread["id"])
         if c["reply_message_id"] == first_row["id"]
     ]
+    classification_id: str | None = None
     if done:
         result: Classification | None = _stored_classification(done[-1])
+        classification_id = done[-1]["id"]
     else:
         result = _classify(deps, first, campaign, outreach)
         if result is not None:
-            _store_classification(deps, thread, first_row, result)
+            classification_id = _store_classification(deps, thread, first_row, result)["id"]
 
     cfg = deps.config
     plan = route(result, cfg.min_confidence, cfg.min_confidence_not_interested)
     if plan.would_suppress and result is not None:
         _record_would_suppress(deps, thread["id"], result)
+
+    view: DraftView | None = None
+    draft_id: str | None = None
+    if plan.lane == LANE_DRAFT and draft_enabled(deps) and result and classification_id:
+        plan, view, draft_id = prepare_draft(
+            deps, thread, classification_id, result, first, outreach, plan
+        )
 
     channel = cfg.channel_for(plan.lane)
     if not channel:
@@ -175,16 +195,20 @@ def handle_first_reply(
             "no Slack channel configured: set SLACK_DRAFT_CHANNEL (SLACK_ALERT_CHANNEL is optional)"
         )
     ts, channel_id = post_reply_card(
-        deps.slack, channel, _card(thread, payload, first, result, plan)
+        deps.slack, channel, _card(thread, payload, first, result, plan, view)
     )
-    db_lane = CardLane.AUTO_ACTION if plan.lane == LANE_WOULD_SUPPRESS else CardLane.HUMAN_ONLY
-    # The draft lane is stored as human_only until C3 attaches a draft: the table requires a
-    # draft_id for lane 'draft'.
+    if plan.lane == LANE_WOULD_SUPPRESS:
+        db_lane = CardLane.AUTO_ACTION
+    elif plan.lane == LANE_DRAFT and draft_id:
+        db_lane = CardLane.DRAFT  # the table requires a draft_id for lane 'draft'
+    else:
+        db_lane = CardLane.HUMAN_ONLY  # including a draft lane card with no draft (C2 behaviour)
     insert_slack_card(
         deps.db,
         NewSlackCard(
             thread_id=thread["id"],
             lane=db_lane,
+            draft_id=draft_id,
             channel=channel_id,
             slack_ts=ts,
             status=CardStatus.POSTED,

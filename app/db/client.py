@@ -219,6 +219,14 @@ def insert_draft(db: Database, draft: NewDraft) -> Row:
     return _insert(db, "drafts", to_row(draft))
 
 
+def get_draft(db: Database, draft_id: str) -> Row | None:
+    return _first(db, "drafts", {"id": draft_id})
+
+
+def update_draft(db: Database, draft_id: str, values: Row) -> Row:
+    return _update(db, "drafts", draft_id, values)
+
+
 def fetch_drafts(db: Database, thread_id: str) -> list[Row]:
     return _select(db, "drafts", {"thread_id": thread_id}, order="created_at")
 

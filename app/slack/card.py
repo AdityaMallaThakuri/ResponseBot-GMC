@@ -130,13 +130,28 @@ class ReplyCard:
     company: str | None = None
     note: str | None = None  # for example "suggest: close"
     buttons: bool = False
+    # C3: the draft reply, if one was made
+    draft_text: str | None = None
+    template_id: str | None = None
+    draft_edited: bool = False
+    draft_notes: tuple[str, ...] = ()  # warnings and why Approve is blocked, in plain words
+    approve_allowed: bool = True
+
+
+DRAFT_LIMIT = 2800  # a Slack section holds 3000 characters
+
+
+def lane_text(card: ReplyCard) -> str:
+    if card.lane == "draft" and card.draft_text is not None:
+        return "draft (for a person to approve; nothing is sent yet)"
+    return LANE_TEXT.get(card.lane, card.lane)
 
 
 def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
     who = f"*{escape_mrkdwn(card.lead_name)}*"
     if card.company:
         who += f" at {escape_mrkdwn(card.company)}"
-    lane = LANE_TEXT.get(card.lane, card.lane)
+    lane = lane_text(card)
     prediction = (
         f"*Label:* `{escape_mrkdwn(card.label)}`  |  *Confidence:* {card.confidence:.2f}"
         if card.label is not None and card.confidence is not None
@@ -168,6 +183,18 @@ def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
             },
         },
     ]
+    if card.draft_text is not None:
+        title = f"*Draft reply* (template {escape_mrkdwn(card.template_id or '?')}"
+        title += ", edited)" if card.draft_edited else ")"
+        body = escape_mrkdwn(card.draft_text)
+        if len(body) > DRAFT_LIMIT:
+            body = body[: DRAFT_LIMIT - 1] + "…"
+        quoted = "\n".join(f">{line}" for line in body.split("\n"))
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"{title}\n{quoted}"}})
+    for line in card.draft_notes:
+        blocks.append(
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": escape_mrkdwn(line)}]}
+        )
     if card.note:
         blocks.append(
             {
@@ -181,7 +208,11 @@ def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
                 "type": "actions",
                 "block_id": ACTIONS_BLOCK_ID,
                 "elements": [
-                    _button(APPROVE, card.thread_ref, "primary"),
+                    *(
+                        [_button(APPROVE, card.thread_ref, "primary")]
+                        if card.approve_allowed
+                        else []
+                    ),
                     _button(EDIT, card.thread_ref),
                     _button(SKIP, card.thread_ref),
                 ],
@@ -192,9 +223,7 @@ def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
 
 def reply_fallback_text(card: ReplyCard) -> str:
     """Notification text. Deliberately has no part of the email body."""
-    return (
-        f"New reply from {card.lead_name} ({card.campaign}): {LANE_TEXT.get(card.lane, card.lane)}"
-    )
+    return f"New reply from {card.lead_name} ({card.campaign}): {lane_text(card)}"
 
 
 def post_reply_card(slack: Any, channel: str, card: ReplyCard) -> tuple[str, str]:

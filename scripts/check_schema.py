@@ -27,7 +27,7 @@ REQUIRED_COLUMNS: dict[str, dict[str, str]] = {
     "threads": {"vertical": "text"},
     "messages": {"message_id": "text", "from_address": "text", "to_address": "text"},
     "classifications": {"extracted_facts": "jsonb"},
-    "drafts": {"template_version": "text"},
+    "drafts": {"template_version": "text", "model": "text", "validator_result": "jsonb"},
     "decisions": {"draft_id": "uuid", "decided_by": "text", "edit_distance_pct": "numeric"},
     "gold_labels": {"human_message_type": "text", "human_verdict": "text", "labeler": "text"},
 }

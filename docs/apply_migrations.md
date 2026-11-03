@@ -15,6 +15,7 @@ to a scratch project first and check them before your real one.
 | `0007_lock_down.sql` | revokes `anon` / `authenticated` table privileges |
 | `0008_decisions_gold_labels.sql` | `decisions`, `gold_labels`; adds `classifications.extracted_facts`, `threads.vertical`, `drafts.template_version` |
 | `0009_actions_would_suppress.sql` | no new table; lets `actions.type` hold `would_suppress` (needed from step C2) |
+| `0010_drafts_model_validator.sql` | no new table; adds `drafts.model` and `drafts.validator_result` (needed from step C3) |
 
 Every file uses `create ... if not exists` or `add column if not exists`, so re-running one is
 harmless. Never edit an applied file: to change a table later, add the next numbered file. A migration that
@@ -37,7 +38,7 @@ creates a table must also enable row level security and revoke `anon` / `authent
 
 ## Option A: Supabase SQL Editor (no tools to install)
 
-For each file, in order `0001` to `0009`:
+For each file, in order `0001` to `0010`:
 
 1. Open the project in the Supabase dashboard, then **SQL Editor** > **New query**.
 2. Paste the whole file and press **Run**.
@@ -236,7 +237,7 @@ end $$;
 
 - The app reaches these tables only with the **service key** (`SUPABASE_SERVICE_KEY`), which
   bypasses row level security. The anon and authenticated keys can read and write nothing.
-- Nothing records which files you applied. Note it somewhere, for example "applied 0001 to 0009 to
+- Nothing records which files you applied. Note it somewhere, for example "applied 0001 to 0010 to
   <project> on <date>", so the next migration starts at the right number.
 
 ## Undoing a mistake

@@ -19,6 +19,7 @@ REQUIRED = (
 DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_MIN_CONFIDENCE = 0.75
 DEFAULT_MIN_CONFIDENCE_NOT_INTERESTED = 0.90
+DEFAULT_DRAFT_MIN_CONFIDENCE = 0.75
 
 
 MIN_WEBHOOK_SECRET_LENGTH = 32
@@ -59,6 +60,10 @@ class Settings(BaseSettings):
     # not_interested never closes automatically. Below this it goes to human_only; at or above
     # it goes to a human with a "suggest: close" note. Either way no automatic action.
     CLASSIFIER_MIN_CONFIDENCE_NOT_INTERESTED: float = DEFAULT_MIN_CONFIDENCE_NOT_INTERESTED
+    # Drafting (C3). Below this confidence a reply is not drafted: it goes to human_only.
+    DRAFT_MIN_CONFIDENCE: float = DEFAULT_DRAFT_MIN_CONFIDENCE
+    # The model that fills the few variable slots of a template (never writes free text).
+    DRAFT_MODEL: str = "claude-sonnet-5-5"
     # Slack channels (name or id). Optional until the step that posts to them is built.
     SLACK_DRAFT_CHANNEL: str | None = None
     SLACK_LOG_CHANNEL: str | None = None
@@ -66,13 +71,18 @@ class Settings(BaseSettings):
     SLACK_SHADOW_CHANNEL: str | None = None
     SLACK_OPS_CHANNEL: str | None = None
 
-    @field_validator("CLASSIFIER_MODEL", "DRAFT_LABEL_MODEL", mode="before")
+    @field_validator("CLASSIFIER_MODEL", "DRAFT_LABEL_MODEL", "DRAFT_MODEL", mode="before")
     @classmethod
-    def _blank_model_is_default(cls, value: object) -> object:
-        return DEFAULT_MODEL if isinstance(value, str) and not value.strip() else value
+    def _blank_model_is_default(cls, value: object, info: ValidationInfo) -> object:
+        if isinstance(value, str) and not value.strip():
+            return cls.model_fields[info.field_name].default
+        return value
 
     @field_validator(
-        "CLASSIFIER_MIN_CONFIDENCE", "CLASSIFIER_MIN_CONFIDENCE_NOT_INTERESTED", mode="before"
+        "CLASSIFIER_MIN_CONFIDENCE",
+        "CLASSIFIER_MIN_CONFIDENCE_NOT_INTERESTED",
+        "DRAFT_MIN_CONFIDENCE",
+        mode="before",
     )
     @classmethod
     def _blank_confidence_is_default(cls, value: object, info: ValidationInfo) -> object:
@@ -80,7 +90,11 @@ class Settings(BaseSettings):
             return cls.model_fields[info.field_name].default
         return value
 
-    @field_validator("CLASSIFIER_MIN_CONFIDENCE", "CLASSIFIER_MIN_CONFIDENCE_NOT_INTERESTED")
+    @field_validator(
+        "CLASSIFIER_MIN_CONFIDENCE",
+        "CLASSIFIER_MIN_CONFIDENCE_NOT_INTERESTED",
+        "DRAFT_MIN_CONFIDENCE",
+    )
     @classmethod
     def _confidence_in_range(cls, value: float) -> float:
         if not 0 <= value <= 1:

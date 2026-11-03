@@ -14,6 +14,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from app.config.settings import Settings, get_settings
+from app.ingest.deps import IngestDeps
 from app.main import app
 from app.slack.card import (
     APPROVE,
@@ -27,6 +28,7 @@ from app.slack.card import (
     resolved_blocks,
 )
 from app.slack.handlers import handle_card_click
+from tests.fakedb import FakeDb
 
 ROOT = Path(__file__).resolve().parent.parent
 SECRET = "signing-secret-for-tests"
@@ -193,11 +195,13 @@ def slack_api(env: None, monkeypatch: pytest.MonkeyPatch) -> Iterator[AsyncMock]
         status_code=200,
     )
     update = AsyncMock(return_value={"ok": True})
+    app.state.ingest = IngestDeps(db=FakeDb(), smartlead=None)  # an empty database: no cards
     with (
         patch.object(AsyncWebClient, "auth_test", AsyncMock(return_value=auth)),
         patch.object(AsyncWebClient, "chat_update", update),
     ):
         yield update
+    del app.state.ingest
 
 
 def post_click(

@@ -9,7 +9,9 @@ from app.ingest.webhook import get_deps
 from app.ingest.webhook import router as webhook_router
 from app.slack.app import create_slack_handler
 from app.slack.app import router as slack_router
-from app.slack.decisions import record_card_click
+from app.slack.service import CardService
+from app.templates.facts import load_facts
+from app.templates.playbook import load_playbook
 
 
 @asynccontextmanager
@@ -20,10 +22,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "GMC_CAMPAIGN_IDS is empty: every Smartlead webhook will be ignored"
         )
 
-    def record(channel: str, ts: str, action_id: str) -> bool:
-        return record_card_click(get_deps(app).db, channel, ts, action_id)
-
-    app.state.slack_handler = create_slack_handler(settings, record)
+    facts = load_facts()
+    playbook = load_playbook(facts=facts)  # fails fast if playbook.yaml is malformed
+    if not playbook.templates:
+        logging.getLogger(__name__).warning(
+            "playbook.yaml has no templates: every reply goes to a human with no draft"
+        )
+    service = CardService(lambda: get_deps(app).db, playbook, facts)
+    app.state.slack_handler = create_slack_handler(settings, service=service)
     yield
 
 

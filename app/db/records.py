@@ -197,6 +197,8 @@ class NewDraft:
     human_edited: bool = False
     final_text: str | None = None
     status: DraftStatus = DraftStatus.PROPOSED
+    model: str | None = None  # the model that filled slots or chose the template
+    validator_result: dict[str, Any] | None = None  # blocking, approve_blockers, warnings
 
 
 @dataclass(frozen=True)

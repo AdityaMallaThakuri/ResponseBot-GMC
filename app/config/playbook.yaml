@@ -1,0 +1,36 @@
+# Reply templates (C3). EMPTY ON PURPOSE: with no template for a label, a draft is never made
+# and the reply goes to a human (human_only). Aryan or Ray approve wording before it is added.
+# A proposal built from past replies is in docs/playbook_proposal.md. It is not approved.
+#
+# version      a string stored with every draft (drafts.template_version); change it with any edit.
+# templates    keyed by the ids in labels.yaml: T1..T8, T2a, T2b, T2c, T3a, T4a, T4b, T5b.
+#
+# Template fields
+#   labels    the message_type labels this template answers (from labels.yaml)
+#   when      one line saying when to use it; used to choose between templates for one label
+#   text      the exact wording, with variable parts as {SLOT} and approved facts as {claim.id}
+#   slots     every {SLOT} used in `text`:
+#               source: first_name   the lead's first name, from the thread
+#               source: company      the lead's company, from the thread
+#               source: model        short words copied from the lead's reply or our email
+#                                    (max_words required; hint tells the model what to look for)
+#               source: placeholder  left as a visible [SLOT NAME]; a human fills it in the Edit
+#                                    window, and Approve is blocked while it remains
+#   claims    ids from facts.yaml used in `text`; every one must be approved
+#   max_chars the longest the finished draft may be (required)
+#
+# Example (synthetic, NOT approved wording):
+#
+# templates:
+#   T1:
+#     labels: [meeting_request]
+#     when: The lead asks for a call or says "sure, let's talk".
+#     text: |
+#       Hi {NAME}, <approved wording> {TIME_OPTIONS} <approved wording> {claim.calendar_link}
+#     slots:
+#       NAME: {source: first_name}
+#       TIME_OPTIONS: {source: placeholder}
+#     claims: [calendar_link]
+#     max_chars: 600
+version: "0"
+templates: {}

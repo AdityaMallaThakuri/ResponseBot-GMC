@@ -29,6 +29,23 @@ NOTICE_ONLY_LABELS = frozenset(
 )
 
 
+# Labels a reply may be drafted for (the draft lane). Every other label goes to a person.
+DRAFT_LABELS = frozenset(
+    {
+        "meeting_request",
+        "info_request",
+        "free_list_request",
+        "price_question",
+        "price_and_info",
+        "lead_magnet_request",
+        "trial_request",
+        "booked_confirmation",
+        "objection_info",
+        "objection_price",
+    }
+)
+
+
 @dataclass(frozen=True)
 class Route:
     lane: str

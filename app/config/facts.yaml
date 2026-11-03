@@ -1,0 +1,23 @@
+# Claims a draft reply may contain: numbers, price ranges, results and links.
+#
+# A draft may only contain a claim whose `approved` is true. NOTHING IS APPROVED BY DEFAULT:
+# Aryan or Ray set `approved: true` after checking the wording. The wording is exact: a template
+# refers to a claim by id ({claim.some_id}) and the engine inserts this text, never a paraphrase.
+#
+# Fields per claim
+#   id              lower_snake_case, unique
+#   kind            number | price | result | link
+#   wording         the exact text a draft may contain
+#   campaign_types  ids from `campaign_types` below, or [all]
+#   approved        true or false
+#
+# campaign_types maps a campaign name to a type: a campaign has every type whose `name_contains`
+# appears in its name (case-insensitive). Empty until someone defines the types.
+campaign_types: []
+
+claims:
+  - id: calendar_link
+    kind: link
+    wording: "https://calendly.com/gamicmedia/one-one"   # from CLAUDE.md; the only link allowed
+    campaign_types: [all]
+    approved: false
