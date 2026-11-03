@@ -27,6 +27,19 @@ pytest
 ruff check .
 ```
 
+## Slack
+
+The app serves Slack events and button clicks at `POST /slack/events`. Slack must be able to reach
+that URL over public HTTPS, so for local runs start a tunnel to port 8000 (for example
+`ngrok http 8000`) and set the Slack app's Interactivity Request URL to
+`https://<tunnel-host>/slack/events`.
+
+Post a sample card (the buttons only acknowledge the click for now):
+
+```bash
+python scripts/post_test_card.py reply-bot-test
+```
+
 ## Docker
 
 ```bash

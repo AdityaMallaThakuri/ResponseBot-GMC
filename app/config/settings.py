@@ -1,11 +1,23 @@
 from functools import lru_cache
 
-from pydantic import ValidationError
+from pydantic import ValidationError, field_validator
+from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Variables the app cannot run without. A blank value counts as missing.
+REQUIRED = (
+    "SMARTLEAD_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "SLACK_BOT_TOKEN",
+    "SLACK_SIGNING_SECRET",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_KEY",
+    "WEBHOOK_SECRET",
+)
 
 
 class ConfigError(RuntimeError):
-    """Raised when required configuration is missing or invalid."""
+    """Raised when required configuration is missing, blank or invalid."""
 
 
 class Settings(BaseSettings):
@@ -20,13 +32,38 @@ class Settings(BaseSettings):
     SEND_ENABLED: bool = False
     CATEGORY_WRITEBACK_ENABLED: bool = False
     WEBHOOK_SECRET: str
+    # Slack channels (name or id). Optional until the step that posts to them is built.
+    SLACK_DRAFT_CHANNEL: str | None = None
+    SLACK_LOG_CHANNEL: str | None = None
+    SLACK_ALERT_CHANNEL: str | None = None
+    SLACK_SHADOW_CHANNEL: str | None = None
+    SLACK_OPS_CHANNEL: str | None = None
+
+    @field_validator(*REQUIRED)
+    @classmethod
+    def _required_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise PydanticCustomError("blank", "blank")
+        return value
+
+    @field_validator(
+        "SLACK_DRAFT_CHANNEL",
+        "SLACK_LOG_CHANNEL",
+        "SLACK_ALERT_CHANNEL",
+        "SLACK_SHADOW_CHANNEL",
+        "SLACK_OPS_CHANNEL",
+        mode="before",
+    )
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
 
 def _describe(error: ValidationError) -> str:
     lines = []
     for item in error.errors():
         name = ".".join(str(part) for part in item["loc"])
-        problem = "missing" if item["type"] == "missing" else item["msg"]
+        problem = item["msg"] if item["type"] not in ("missing", "blank") else item["type"]
         lines.append(f"  - {name}: {problem}")
     return "\n".join(lines)
 
@@ -37,6 +74,6 @@ def get_settings() -> Settings:
         return Settings()  # type: ignore[call-arg]
     except ValidationError as exc:
         raise ConfigError(
-            "Invalid configuration. Set these variables in .env or the environment "
-            "(see .env.example):\n" + _describe(exc)
+            "Invalid configuration. Give a value to these variables in .env or the "
+            "environment (see .env.example):\n" + _describe(exc)
         ) from None

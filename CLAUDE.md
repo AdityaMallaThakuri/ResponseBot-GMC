@@ -36,6 +36,9 @@ Rate limit 120 requests per minute per key, handle 429 with backoff. Master-inbo
 - `reply_to_stats_id` is the `stats_id` of the lead's latest REPLY. This is unverified until the first approved staging send.
 - Category write-back is off (`CATEGORY_WRITEBACK_ENABLED=false`, and it also needs `SEND_ENABLED`). It is limited to `reply_label` categories in `app/config/smartlead_categories.yaml`; workflow triggers ("Generate ..." and Find Phone Number) and unknown categories are never written. The per-lead category endpoint (method and path) is unverified and not implemented.
 
+## Slack facts
+Slack Bolt (async) is mounted on FastAPI at `POST /slack/events`; events and interactivity share that one URL. Bolt verifies every request's signature with SLACK_SIGNING_SECRET and rejects bad ones with 401. Card buttons use the action ids `reply_approve`, `reply_edit`, `reply_skip`. As of step A4 a click only acknowledges and updates the message (who clicked, what they chose); Slack code writes nothing to the database yet. The channel settings SLACK_DRAFT_CHANNEL, SLACK_LOG_CHANNEL, SLACK_ALERT_CHANNEL, SLACK_SHADOW_CHANNEL and SLACK_OPS_CHANNEL are optional until the step that uses them. Never log the bot token, the signing secret or a Slack payload (it can carry email text).
+
 ## Data model
 Supabase Postgres. SQL lives in db/migrations (numbered, applied in order by hand, see docs/apply_migrations.md); `python scripts/check_schema.py` validates them against this section.
 Tables: raw_events, threads, messages, classifications, qualifications, drafts, slack_cards, actions, suppressions, retry_queue, eval_results, decisions, gold_labels.
