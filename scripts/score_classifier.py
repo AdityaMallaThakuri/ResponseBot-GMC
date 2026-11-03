@@ -338,10 +338,80 @@ def threshold_report(rows: list[dict[str, Any]], preds: dict, min_confidence: fl
     ]
 
 
+CLOSE_LABELS = ("not_interested", "objection_info", "objection_price")
+
+
+def decision_for(pred: dict[str, Any], min_confidence: float, min_ni: float) -> Any:
+    """The policy decision for one saved prediction (an error counts as no classification)."""
+    from app.classify.classifier import Classification
+    from app.classify.policy import decide
+
+    if pred["label"] == ERROR:
+        return decide(None, min_confidence, min_ni)
+    result = Classification(
+        pred["label"], pred["confidence"], pred.get("reason", ""), pred["source"]
+    )
+    return decide(result, min_confidence, min_ni)
+
+
+def safety_report(
+    rows: list[dict[str, Any]], preds: dict, min_confidence: float, min_ni: float
+) -> list[str]:
+    """What the safety rules do: automatic actions, and not_interested / objection handling."""
+    from app.classify.policy import AUTO_SUPPRESS, SUGGEST_CLOSE
+
+    dec = {
+        r["thread_id"]: decision_for(preds[r["thread_id"]], min_confidence, min_ni) for r in rows
+    }
+    label = {r["thread_id"]: preds[r["thread_id"]]["label"] for r in rows}
+    auto = [r for r in rows if dec[r["thread_id"]].auto_action == AUTO_SUPPRESS]
+    auto_wrong = [r for r in auto if r["human"] != "do_not_contact"]
+
+    ni = [r for r in rows if label[r["thread_id"]] == "not_interested"]
+    ni_note = [r for r in ni if dec[r["thread_id"]].note == SUGGEST_CLOSE]
+    ni_plain = [r for r in ni if dec[r["thread_id"]].note is None]
+
+    def wrong(group: list[dict[str, Any]]) -> int:
+        return sum(1 for r in group if r["human"] != "not_interested")
+
+    # The earlier rule closed every not_interested prediction at or above the general threshold.
+    old_closed = [r for r in ni if preds[r["thread_id"]]["confidence"] >= min_confidence]
+
+    mine = [r for r in rows if r["human"] in CLOSE_LABELS]
+    mine_closed = [r for r in mine if r in old_closed]
+    by_human = Counter(r["human"] for r in mine)
+    lanes = Counter(dec[r["thread_id"]].lane for r in mine)
+
+    return [
+        f"Safety rules (not_interested threshold {min_ni}; only do_not_contact acts on its own):",
+        f"  automatic suppressions: {len(auto)}, wrong: {len(auto_wrong)}",
+        f"  predicted not_interested: {len(ni)}, all go to a human, none are closed automatically",
+        f"    with 'suggest: close' (confidence >= {min_ni}): {len(ni_note)}, "
+        f"really not_interested: {len(ni_note) - wrong(ni_note)}, "
+        f"something else: {wrong(ni_note)}",
+        f"    human_only, no note (confidence < {min_ni}): {len(ni_plain)}, "
+        f"really not_interested: {len(ni_plain) - wrong(ni_plain)}, "
+        f"something else: {wrong(ni_plain)}",
+        f"  before this rule, predicted not_interested at >= {min_confidence} would have been "
+        f"closed automatically: {len(old_closed)}, of which not really not_interested: "
+        f"{wrong(old_closed)}",
+        f"  rows the human labelled not_interested/objection: {len(mine)} "
+        f"({', '.join(f'{k} {v}' for k, v in sorted(by_human.items()))})",
+        f"    would have been closed automatically before: {len(mine_closed)}",
+        f"    now: human_only {lanes['human_only']}, "
+        f"continue (draft for approval) {lanes['continue']}",
+        "    closed automatically now: 0 (no action exists for these labels)",
+    ]
+
+
 def group_report(
-    rows: list[dict[str, Any]], preds: dict, min_confidence: float, title: str
+    rows: list[dict[str, Any]],
+    preds: dict,
+    min_confidence: float,
+    title: str,
+    min_ni: float = 0.90,
 ) -> dict[str, Any]:
-    """Second report: accuracy by action group, then the confidence threshold. Unsure excluded."""
+    """Second report: action groups, the confidence threshold, the safety rules. Unsure excluded."""
     scored = [r for r in rows if not r["unsure"]]
     grouped = group_rows(scored, preds)
     right = sum(1 for r in grouped if r["human_group"] == r["pred_group"])
@@ -351,6 +421,7 @@ def group_report(
     print("\n" + "\n".join(group_table(grouped)))
     print("\n" + "\n".join(group_confusion(grouped)))
     print("\n" + "\n".join(threshold_report(scored, preds, min_confidence)))
+    print("\n" + "\n".join(safety_report(scored, preds, min_confidence, min_ni)))
     return {"group_right": right, "total": len(grouped)}
 
 
@@ -374,6 +445,11 @@ def main(argv: list[str]) -> int:
     p.add_argument("--cached-only", action="store_true", help="never call the model")
     p.add_argument("--groups-only", action="store_true", help="print only the action-group report")
     p.add_argument("--min-confidence", type=float, help="override CLASSIFIER_MIN_CONFIDENCE")
+    p.add_argument(
+        "--min-confidence-not-interested",
+        type=float,
+        help="override CLASSIFIER_MIN_CONFIDENCE_NOT_INTERESTED",
+    )
     args = p.parse_args(argv)
 
     from app.classify.classifier import Classifier
@@ -412,7 +488,12 @@ def main(argv: list[str]) -> int:
         else:
             print(f"\nTop {args.mistakes} mistakes (most confident first):")
             print("\n".join(mistakes(result["scored"], preds, args.mistakes)))
-    group_report(rows, preds, min_confidence, title)
+    min_ni = (
+        args.min_confidence_not_interested
+        if args.min_confidence_not_interested is not None
+        else settings.CLASSIFIER_MIN_CONFIDENCE_NOT_INTERESTED
+    )
+    group_report(rows, preds, min_confidence, title, min_ni)
     return 0
 
 

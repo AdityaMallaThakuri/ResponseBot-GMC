@@ -262,3 +262,61 @@ def test_cached_only_never_calls_the_model(tmp_path: Path) -> None:
     sc.predict(rows, clf, cache, workers=1)
     assert sc.predict(rows, clf, cache, workers=1, cached_only=True)["a"]["label"] == "info_request"
     assert len(calls) == 1
+
+
+# ------------------------------------------------------------------ safety report
+
+
+def safety_fixture() -> tuple[list[dict], dict]:
+    rows = [
+        row("a", "not_interested"),  # predicted NI at 0.95: suggest close
+        row("b", "not_interested"),  # predicted NI at 0.85: human_only, no note
+        row("c", "objection_info"),  # predicted NI at 0.80: the dangerous case, now caught
+        row("d", "objection_price"),  # predicted NI at 0.95: suggest close, but wrong
+        row("e", "objection_info"),  # predicted objection_info at 0.9: draft for approval
+        row("f", "do_not_contact"),  # rule: suppressed
+        row("g", "info_request"),  # predicted do_not_contact at 0.8: a wrong suppression
+    ]
+    preds = {
+        "a": pred("not_interested", 0.95),
+        "b": pred("not_interested", 0.85),
+        "c": pred("not_interested", 0.80),
+        "d": pred("not_interested", 0.95),
+        "e": pred("objection_info", 0.9),
+        "f": pred("do_not_contact", 1.0, source="rule"),
+        "g": pred("do_not_contact", 0.8),
+    }
+    return rows, preds
+
+
+def test_safety_report_counts_what_the_rule_changes() -> None:
+    rows, preds = safety_fixture()
+    out = chr(10).join(sc.safety_report(rows, preds, 0.75, 0.90))
+    assert "automatic suppressions: 2, wrong: 1" in out
+    assert "predicted not_interested: 4, all go to a human, none are closed automatically" in out
+    tail = "really not_interested: 1, something else: 1"
+    assert f"with 'suggest: close' (confidence >= 0.9): 2, {tail}" in out
+    assert f"human_only, no note (confidence < 0.9): 2, {tail}" in out
+    assert "closed automatically: 4, of which not really not_interested: 2" in out
+    assert "labelled not_interested/objection: 5 (" in out
+    assert "not_interested 2, objection_info 2, objection_price 1" in out
+    assert "would have been closed automatically before: 4" in out  # a, b, c, d
+    assert "now: human_only 4, continue (draft for approval) 1" in out
+    assert "closed automatically now: 0" in out
+
+
+def test_safety_report_threshold_can_be_moved() -> None:
+    rows, preds = safety_fixture()
+    strict = "\n".join(sc.safety_report(rows, preds, 0.75, 0.99))
+    assert "with 'suggest: close' (confidence >= 0.99): 0" in strict
+
+
+def test_decision_for_treats_errors_as_no_classification() -> None:
+    d = sc.decision_for(pred(sc.ERROR, 0.0), 0.75, 0.90)
+    assert (d.lane, d.auto_action) == ("human_only", None)
+
+
+def test_group_report_prints_the_safety_section(capsys: pytest.CaptureFixture[str]) -> None:
+    rows, preds = safety_fixture()
+    sc.group_report(rows, preds, 0.75, "TEST", 0.90)
+    assert "Safety rules (not_interested threshold 0.9" in capsys.readouterr().out

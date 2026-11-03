@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import ValidationError, field_validator
+from pydantic import ValidationError, ValidationInfo, field_validator
 from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -18,6 +18,7 @@ REQUIRED = (
 
 DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_MIN_CONFIDENCE = 0.75
+DEFAULT_MIN_CONFIDENCE_NOT_INTERESTED = 0.90
 
 
 class ConfigError(RuntimeError):
@@ -41,6 +42,9 @@ class Settings(BaseSettings):
     DRAFT_LABEL_MODEL: str = DEFAULT_MODEL
     # Below this model confidence the thread goes to a human with no draft. Rules score 1.0.
     CLASSIFIER_MIN_CONFIDENCE: float = DEFAULT_MIN_CONFIDENCE
+    # not_interested never closes automatically. Below this it goes to human_only; at or above
+    # it goes to a human with a "suggest: close" note. Either way no automatic action.
+    CLASSIFIER_MIN_CONFIDENCE_NOT_INTERESTED: float = DEFAULT_MIN_CONFIDENCE_NOT_INTERESTED
     # Slack channels (name or id). Optional until the step that posts to them is built.
     SLACK_DRAFT_CHANNEL: str | None = None
     SLACK_LOG_CHANNEL: str | None = None
@@ -53,12 +57,16 @@ class Settings(BaseSettings):
     def _blank_model_is_default(cls, value: object) -> object:
         return DEFAULT_MODEL if isinstance(value, str) and not value.strip() else value
 
-    @field_validator("CLASSIFIER_MIN_CONFIDENCE", mode="before")
+    @field_validator(
+        "CLASSIFIER_MIN_CONFIDENCE", "CLASSIFIER_MIN_CONFIDENCE_NOT_INTERESTED", mode="before"
+    )
     @classmethod
-    def _blank_confidence_is_default(cls, value: object) -> object:
-        return DEFAULT_MIN_CONFIDENCE if isinstance(value, str) and not value.strip() else value
+    def _blank_confidence_is_default(cls, value: object, info: ValidationInfo) -> object:
+        if isinstance(value, str) and not value.strip():
+            return cls.model_fields[info.field_name].default
+        return value
 
-    @field_validator("CLASSIFIER_MIN_CONFIDENCE")
+    @field_validator("CLASSIFIER_MIN_CONFIDENCE", "CLASSIFIER_MIN_CONFIDENCE_NOT_INTERESTED")
     @classmethod
     def _confidence_in_range(cls, value: float) -> float:
         if not 0 <= value <= 1:

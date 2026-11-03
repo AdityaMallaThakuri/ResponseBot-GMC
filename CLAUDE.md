@@ -19,8 +19,9 @@ Python 3.12, FastAPI, Slack Bolt, Supabase Postgres, Anthropic API (small model 
 - Never invent a price, a case-study number, a time slot or a link. Use only what is in playbook.yaml and the calendar.
 - Anything uncertain (low classifier confidence, Smartlead category disagrees, off-script message, validator failure) goes to a human with no draft.
 - A model classification with confidence below CLASSIFIER_MIN_CONFIDENCE (default 0.75) goes to human_only with no draft. Rule-based results keep confidence 1.0, and a classifier error also goes to a human (`app/classify/confidence.py`).
-- Do-not-contact and bounce replies are suppressed automatically and never drafted.
-- Unsubscribe and not-interested replies are suppressed at campaign scope. A global unsubscribe happens only for explicit broad opt-outs (remove me from all lists, do not contact me again, legal threat, spam complaint), and only after a human confirms in Slack. The Smartlead client never goes global on its own. Suppressions record a scope (campaign, client, global).
+- Only do_not_contact may trigger an automatic suppression or unsubscribe. Never auto-suppress or auto-close for not_interested, objection_info or objection_price (`app/classify/policy.py`, `require_auto_action_allowed`). not_interested always goes to a human with no draft: below CLASSIFIER_MIN_CONFIDENCE_NOT_INTERESTED (default 0.90) with no note, at or above it with a "suggest: close" note. Either way a human closes it; no automatic action.
+- Do-not-contact replies are suppressed automatically and never drafted. Bounce replies are never drafted (a bounce label does not trigger an automatic suppression).
+- Unsubscribe (do_not_contact) replies are suppressed at campaign scope. A global unsubscribe happens only for explicit broad opt-outs (remove me from all lists, do not contact me again, legal threat, spam complaint), and only after a human confirms in Slack. The Smartlead client never goes global on its own. Suppressions record a scope (campaign, client, global).
 - Secrets only in .env. Never log full email bodies at INFO level outside Supabase.
 - Autonomy levels: notify only, draft for approval, automatic safe action. Auto-send is out of scope until the GMC pilot proves it.
 
