@@ -1,0 +1,46 @@
+{
+  "history": [
+    {
+      "stats_id": "11111111-aaaa-4aaa-8aaa-000000000001",
+      "from": "ray@gamicmedia.example",
+      "to": "jane@example.com",
+      "type": "SENT",
+      "message_id": "<msg-1@gamicmedia.example>",
+      "time": "2026-10-19T19:05:15.478Z",
+      "email_body": "<p>Jane - saw Acme Advisory closed a deal.</p><p>Worth a chat?</p>--<br>Ray<br>Gamic Media",
+      "subject": "Q4 targets",
+      "email_seq_number": "1",
+      "open_count": 0,
+      "click_count": 0,
+      "click_details": {}
+    },
+    {
+      "stats_id": "11111111-aaaa-4aaa-8aaa-000000000001",
+      "from": "jane@example.com",
+      "to": "ray@gamicmedia.example",
+      "attachments": null,
+      "type": "REPLY",
+      "message_id": "<reply-1@example.com>",
+      "time": "2026-10-20T14:00:00.000Z",
+      "email_body": "<div dir=\"ltr\"><div>Sounds interesting, can you send times?</div><br><div class=\"gmail_quote\"><div dir=\"ltr\" class=\"gmail_attr\">On Mon, Oct 19, 2026 at 2:05 PM Ray &lt;ray@gamicmedia.example&gt; wrote:<br></div><blockquote class=\"gmail_quote\"><p>Jane - saw Acme Advisory closed a deal.</p></blockquote></div></div>",
+      "email_seq_number": "1",
+      "cc": []
+    },
+    {
+      "stats_id": "22222222-bbbb-4bbb-8bbb-000000000002",
+      "from": "ray@gamicmedia.example",
+      "to": "jane@example.com",
+      "type": "SENT",
+      "message_id": "<msg-2@gamicmedia.example>",
+      "time": "2026-10-21T19:24:26.501Z",
+      "email_body": "<p>Jane - assuming this is not a fit.</p>",
+      "subject": "RE: Q4 targets",
+      "email_seq_number": "2",
+      "open_count": 1,
+      "click_count": 0,
+      "click_details": {}
+    }
+  ],
+  "from": "ray@gamicmedia.example",
+  "to": "jane@example.com"
+}

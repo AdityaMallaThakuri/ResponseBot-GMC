@@ -1,0 +1,51 @@
+{
+  "ok": true,
+  "data": [
+    {
+      "lead_category_id": 1,
+      "last_sent_time": "2026-10-21T19:24:26.501Z",
+      "last_reply_time": "2026-10-20T14:00:00.000Z",
+      "has_new_unread_email": true,
+      "email_account_id": 900,
+      "lead_first_name": "Jane",
+      "lead_last_name": "Doe",
+      "lead_email": "jane@example.com",
+      "email_lead_id": "555",
+      "email_lead_map_id": "777",
+      "lead_status": "INPROGRESS",
+      "email_campaign_id": 101,
+      "email_campaign_name": "GMC - Example Campaign",
+      "client_id": null,
+      "email_history": [
+        {
+          "stats_id": "11111111-aaaa-4aaa-8aaa-000000000001",
+          "from": "ray@gamicmedia.example",
+          "to": "jane@example.com",
+          "type": "SENT",
+          "message_id": "<msg-1@gamicmedia.example>",
+          "time": "2026-10-19T19:05:15.478Z",
+          "email_body": "<p>Jane - worth a chat?</p>",
+          "subject": "Q4 targets",
+          "email_seq_number": "1",
+          "open_count": 0,
+          "click_count": 0,
+          "click_details": {}
+        },
+        {
+          "stats_id": "11111111-aaaa-4aaa-8aaa-000000000001",
+          "from": "jane@example.com",
+          "to": "ray@gamicmedia.example",
+          "type": "REPLY",
+          "message_id": "<reply-1@example.com>",
+          "time": "2026-10-20T14:00:00.000Z",
+          "email_body": "<div>Sounds interesting, can you send times?</div>",
+          "email_seq_number": "1",
+          "cc": [],
+          "attachments": []
+        }
+      ]
+    }
+  ],
+  "offset": 0,
+  "limit": 3
+}
