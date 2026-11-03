@@ -232,3 +232,43 @@ def post_reply_card(slack: Any, channel: str, card: ReplyCard) -> tuple[str, str
         channel=channel, text=reply_fallback_text(card), blocks=build_reply_card_blocks(card)
     )
     return response["ts"], response.get("channel") or channel
+
+
+# -- the outcome of a send (C4) ---------------------------------------------------------------
+
+RETRY_SEND = "reply_retry_send"
+SEND_OUTCOME_BLOCK_ID = "send_outcome"
+SEND_ACTIONS_BLOCK_ID = "send_retry_actions"
+
+
+def with_send_outcome(blocks: list[Block], text: str, retry_ref: str | None = None) -> list[Block]:
+    """The card with one line saying what happened to the send, and a Retry button if it can be."""
+    kept = [
+        b
+        for b in blocks
+        if b.get("block_id") not in (SEND_OUTCOME_BLOCK_ID, SEND_ACTIONS_BLOCK_ID)
+        and b.get("type") != "actions"
+    ]
+    kept.append(
+        {
+            "type": "context",
+            "block_id": SEND_OUTCOME_BLOCK_ID,
+            "elements": [{"type": "mrkdwn", "text": f"*{escape_mrkdwn(text)}*"}],
+        }
+    )
+    if retry_ref:
+        kept.append(
+            {
+                "type": "actions",
+                "block_id": SEND_ACTIONS_BLOCK_ID,
+                "elements": [
+                    {
+                        "type": "button",
+                        "action_id": RETRY_SEND,
+                        "text": {"type": "plain_text", "text": "Retry send"},
+                        "value": retry_ref,
+                    }
+                ],
+            }
+        )
+    return kept

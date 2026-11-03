@@ -14,7 +14,15 @@ from slack_bolt.async_app import AsyncAck, AsyncApp
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
-from app.slack.card import APPROVE, CHOICES, EDIT, SKIP, resolved_blocks
+from app.slack.card import (
+    APPROVE,
+    CHOICES,
+    EDIT,
+    RETRY_SEND,
+    SKIP,
+    resolved_blocks,
+    with_send_outcome,
+)
 from app.slack.service import EDIT_CALLBACK_ID, TEXT_ACTION_ID, TEXT_BLOCK_ID, CardService
 
 log = logging.getLogger(__name__)
@@ -109,6 +117,9 @@ async def handle_service_click(
     if result.kind not in ("recorded", "unknown"):
         return
     blocks = resolved_blocks(message.get("blocks", []), user_id, action_id)
+    if result.send is not None:
+        retry_ref = ts if result.send.retryable else None
+        blocks = with_send_outcome(blocks, result.send.text, retry_ref)
     try:
         await client.chat_update(
             channel=channel,
@@ -118,6 +129,32 @@ async def handle_service_click(
         )
     except SlackApiError as exc:
         log.warning("could not update card %s: %s", ts, exc.response.get("error"))
+
+
+async def handle_retry_send(
+    ack: AsyncAck, body: dict[str, Any], client: AsyncWebClient, service: CardService
+) -> None:
+    """The Retry send button: try the send again and show what happened."""
+    await ack()
+    message = body.get("message") or {}
+    channel = (body.get("channel") or {}).get("id")
+    user_id = (body.get("user") or {}).get("id")
+    ts = message.get("ts")
+    if not (channel and user_id and ts):
+        return
+    try:
+        result = await run_in_threadpool(service.retry_send, channel, ts, user_id)
+        if result.kind != "recorded" or result.send is None:
+            return
+        retry_ref = ts if result.send.retryable else None
+        blocks = with_send_outcome(message.get("blocks", []), result.send.text, retry_ref)
+        await client.chat_update(
+            channel=channel, ts=ts, text=f"Reply card: {result.send.status}", blocks=blocks
+        )
+    except SlackApiError as exc:
+        log.warning("could not update the card after a retry: %s", exc.response.get("error"))
+    except Exception as exc:  # noqa: BLE001 - never log the payload
+        log.warning("retry send failed: %s", type(exc).__name__)
 
 
 async def handle_edit_submission(
@@ -166,6 +203,11 @@ def register_card_handlers(
             await handle_edit_submission(ack, body, client, service)
 
         app.view(EDIT_CALLBACK_ID)(on_submit)
+
+        async def on_retry(ack: AsyncAck, body: dict[str, Any], client: AsyncWebClient) -> None:
+            await handle_retry_send(ack, body, client, service)
+
+        app.action(RETRY_SEND)(on_retry)
         return
     if record is None:
         app.action(APPROVE)(on_approve)

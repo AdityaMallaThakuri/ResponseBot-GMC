@@ -34,6 +34,7 @@ from app.db.client import (
 )
 from app.db.records import CardStatus, Decision, DraftStatus, NewDecision
 from app.ingest.draft_step import DraftView, notes_for
+from app.send.sender import SendResult, SendService
 from app.slack.card import APPROVE, SKIP, ReplyCard, build_reply_card_blocks, reply_fallback_text
 from app.slack.decisions import record_card_click
 from app.templates.facts import Facts
@@ -56,6 +57,7 @@ SLACK_USER = re.compile(r"^[UW][A-Z0-9]{2,}$")
 class ClickResult:
     kind: str  # "recorded", "ignored", "blocked" or "unknown" (not a card we stored)
     message: str | None = None
+    send: SendResult | None = None  # C4: what happened when the approval tried to send
 
 
 @dataclass(frozen=True)
@@ -71,8 +73,15 @@ def edit_distance_pct(before: str, after: str) -> float:
 
 
 class CardService:
-    def __init__(self, get_db: Callable[[], Database], playbook: Playbook, facts: Facts) -> None:
+    def __init__(
+        self,
+        get_db: Callable[[], Database],
+        playbook: Playbook,
+        facts: Facts,
+        sender: SendService | None = None,
+    ) -> None:
         self._get_db = get_db
+        self.sender = sender
         self.playbook = playbook
         self.facts = facts
 
@@ -135,7 +144,25 @@ class CardService:
             return ClickResult("ignored")  # someone else decided first
         update_draft(self.db, draft["id"], {"status": status.value})
         update_slack_card(self.db, card["id"], {"status": card_status.value})
-        return ClickResult("recorded")
+        sent = None
+        if action_id == APPROVE and self.sender is not None:
+            # The approval is recorded first; the send then checks that a person approved.
+            sent = self.sender.send_draft(draft["id"], f"human:{user_id}")
+        return ClickResult("recorded", send=sent)
+
+    def retry_send(self, channel: str, ts: str, user_id: str) -> ClickResult:
+        """Try again to send an approved draft whose last send failed or was blocked."""
+        card = find_slack_card(self.db, channel, ts)
+        if (
+            self.sender is None
+            or card is None
+            or not card.get("draft_id")
+            or card.get("status") not in (CardStatus.APPROVED.value, CardStatus.FAILED.value)
+            or not SLACK_USER.match(user_id or "")
+        ):
+            return ClickResult("ignored")
+        sent = self.sender.send_draft(card["draft_id"], f"human:{user_id}")
+        return ClickResult("recorded", send=sent)
 
     # -- Edit ----------------------------------------------------------------------------
 

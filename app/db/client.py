@@ -366,3 +366,19 @@ def fetch_eval_results(db: Database, limit: int = 20) -> list[Row]:
 def find_slack_card(db: Database, channel: str, slack_ts: str) -> Row | None:
     """The card a Slack message belongs to: a message is identified by channel id and ts."""
     return _first(db, "slack_cards", {"channel": channel, "slack_ts": slack_ts})
+
+
+def claim_draft(db: Database, draft_id: str, from_status: str, to_status: str) -> bool:
+    """Move a draft between statuses only if it is still in from_status. True if this call won.
+
+    One UPDATE ... WHERE status = from_status, so of two simultaneous callers only one gets a row.
+    """
+    data = (
+        db.table("drafts")
+        .update({"status": to_status})
+        .eq("id", draft_id)
+        .eq("status", from_status)
+        .execute()
+        .data
+    )
+    return bool(data)

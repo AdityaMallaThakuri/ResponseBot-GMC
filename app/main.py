@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from app.config.settings import get_settings
 from app.ingest.webhook import get_deps
 from app.ingest.webhook import router as webhook_router
+from app.send.sender import SendConfig, SendService
 from app.slack.app import create_slack_handler
 from app.slack.app import router as slack_router
 from app.slack.service import CardService
@@ -28,7 +29,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logging.getLogger(__name__).warning(
             "playbook.yaml has no templates: every reply goes to a human with no draft"
         )
-    service = CardService(lambda: get_deps(app).db, playbook, facts)
+    send_config = SendConfig.from_settings(settings)
+    log = logging.getLogger(__name__)
+    if settings.LIVE_SEND_ALL:
+        log.warning(
+            "LIVE_SEND_ALL is ON: the allowlist is bypassed. It must stay off until go-live"
+        )
+    elif settings.SEND_ENABLED and not send_config.allowlist:
+        log.warning("SEND_ENABLED is on but SEND_ALLOWLIST is empty: nothing can be sent")
+    elif settings.SEND_ENABLED:
+        log.warning(
+            "SEND_ENABLED is on: replies go only to %d allowlisted address(es)",
+            len(send_config.allowlist),
+        )
+    sender = SendService(
+        lambda: get_deps(app).db, lambda: get_deps(app).smartlead, playbook, facts, send_config
+    )
+    service = CardService(lambda: get_deps(app).db, playbook, facts, sender)
     app.state.slack_handler = create_slack_handler(settings, service=service)
     yield
 

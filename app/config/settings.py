@@ -1,3 +1,4 @@
+import re
 from functools import lru_cache
 
 from pydantic import ValidationError, ValidationInfo, field_validator
@@ -25,6 +26,18 @@ DEFAULT_DRAFT_MIN_CONFIDENCE = 0.75
 MIN_WEBHOOK_SECRET_LENGTH = 32
 
 
+_EMAIL = re.compile(r"^[^@\s,;]+@[^@\s,;]+[.][^@\s,;]+$")
+
+
+def parse_allowlist(value: str) -> frozenset[str]:
+    """ "a@x.com, B@y.com" -> {"a@x.com", "b@y.com"}. Blank means nobody. Raises ValueError."""
+    addresses = [part.strip().lower() for part in value.split(",") if part.strip()]
+    bad = [a for a in addresses if not _EMAIL.match(a)]
+    if bad:
+        raise ValueError("must be comma-separated email addresses, for example me@example.com")
+    return frozenset(addresses)
+
+
 def parse_campaign_ids(value: str) -> frozenset[int]:
     """ "101, 102" -> {101, 102}. Blank means none. Raises ValueError on anything else."""
     ids = [part.strip() for part in value.split(",") if part.strip()]
@@ -47,6 +60,11 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_SERVICE_KEY: str
     SEND_ENABLED: bool = False
+    # Second lock on sending (C4). Even with SEND_ENABLED true, a reply is only sent to an address
+    # listed here (comma separated). Empty means nobody.
+    SEND_ALLOWLIST: str = ""
+    # Bypasses SEND_ALLOWLIST. MUST STAY FALSE until we decide to go live.
+    LIVE_SEND_ALL: bool = False
     CATEGORY_WRITEBACK_ENABLED: bool = False
     WEBHOOK_SECRET: str
     # Smartlead campaign ids the bot handles, comma separated (for example "101,102").
@@ -109,6 +127,16 @@ class Settings(BaseSettings):
                 "too_short", f"needs at least {MIN_WEBHOOK_SECRET_LENGTH} characters"
             )
         return value
+
+    @field_validator("SEND_ALLOWLIST")
+    @classmethod
+    def _allowlist_is_emails(cls, value: str) -> str:
+        parse_allowlist(value)
+        return value
+
+    @property
+    def send_allowlist(self) -> frozenset[str]:
+        return parse_allowlist(self.SEND_ALLOWLIST)
 
     @field_validator("GMC_CAMPAIGN_IDS")
     @classmethod

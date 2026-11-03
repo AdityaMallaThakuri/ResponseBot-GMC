@@ -35,6 +35,7 @@ def make_client(*responses: httpx.Response, send_enabled: bool = False, **kw):
     client = SmartleadClient(
         "secret-key",
         send_enabled=send_enabled,
+        send_allowlist=kw.pop("send_allowlist", frozenset({"jane@example.com"})),
         transport=httpx.MockTransport(rec),
         sleep=sleeps.append,
         jitter=lambda lo, hi: hi,

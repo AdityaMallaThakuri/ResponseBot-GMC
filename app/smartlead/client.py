@@ -11,7 +11,12 @@ import httpx
 from app.config.settings import Settings
 from app.db.suppressions import SuppressionScope
 from app.smartlead.categories import Category, CategoryKind, load_categories
-from app.smartlead.errors import CategoryWriteRefused, SendDisabledError, SmartleadError
+from app.smartlead.errors import (
+    CategoryWriteRefused,
+    RecipientNotAllowed,
+    SendDisabledError,
+    SmartleadError,
+)
 from app.smartlead.models import Lead, Thread, UnsubscribeResult
 from app.smartlead.thread import latest_reply_stats_id, parse_thread
 
@@ -62,6 +67,8 @@ class SmartleadClient:
         api_key: str,
         *,
         send_enabled: bool = False,
+        send_allowlist: frozenset[str] = frozenset(),
+        live_send_all: bool = False,
         category_writeback_enabled: bool = False,
         categories: Mapping[int, Category] | None = None,
         requests_per_minute: int = 120,
@@ -73,6 +80,8 @@ class SmartleadClient:
     ) -> None:
         self._api_key = api_key
         self._send_enabled = send_enabled
+        self._send_allowlist = frozenset(a.strip().lower() for a in send_allowlist)
+        self._live_send_all = live_send_all
         self._category_writeback_enabled = category_writeback_enabled
         self._categories = categories if categories is not None else load_categories()
         self._sleep = sleep
@@ -85,6 +94,8 @@ class SmartleadClient:
         return cls(
             settings.SMARTLEAD_API_KEY,
             send_enabled=settings.SEND_ENABLED,
+            send_allowlist=settings.send_allowlist,
+            live_send_all=settings.LIVE_SEND_ALL,
             category_writeback_enabled=settings.CATEGORY_WRITEBACK_ENABLED,
         )
 
@@ -196,6 +207,12 @@ class SmartleadClient:
             raise SendDisabledError("SEND_ENABLED is false; refusing to send a reply")
         if not thread.reply_to_stats_id:
             raise SmartleadError("thread has no reply_to_stats_id; cannot send a reply")
+        # Second lock: only an allowlisted address, unless LIVE_SEND_ALL was switched on.
+        recipient = (thread.to_email or "").strip().lower()
+        if not self._live_send_all and recipient not in self._send_allowlist:
+            raise RecipientNotAllowed(
+                "recipient is not in SEND_ALLOWLIST; refusing to send a reply"
+            )
         payload: dict[str, Any] = {
             "email_stats_id": thread.reply_to_stats_id,
             "email_body": body,
