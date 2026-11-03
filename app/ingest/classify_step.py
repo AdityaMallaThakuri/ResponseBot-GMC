@@ -12,6 +12,7 @@ classification is not classified again, and the would_suppress action is recorde
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from app.classify.classifier import Classification
@@ -20,7 +21,9 @@ from app.db.client import (
     Row,
     fetch_actions,
     fetch_classifications,
+    fetch_messages,
     fetch_slack_cards,
+    get_thread,
     insert_action,
     insert_classification,
     insert_slack_card,
@@ -189,3 +192,38 @@ def handle_first_reply(
     )
     logger.info("thread %s classified and posted: lane %s", thread["id"], plan.lane)
     return True
+
+
+def messages_from_rows(rows: list[Row]) -> list[tuple[Message, Row]]:
+    """Stored message rows back into parsed messages, oldest first, each with its row."""
+    pairs = [
+        (
+            Message(
+                direction=Direction(row["direction"]),
+                timestamp=datetime.fromisoformat(str(row["sent_at"]).replace("Z", "+00:00")),
+                text=row["body_clean"],
+                stats_id=row["stats_id"],
+                message_id=row["message_id"],
+                from_addr=row["from_address"],
+                to_addr=row["to_address"],
+            ),
+            row,
+        )
+        for row in rows
+    ]
+    return sorted(pairs, key=lambda pair: pair[0].timestamp)
+
+
+def classify_stored_thread(deps: IngestDeps, thread_id: str) -> bool:
+    """Run the C2 step from rows already in the database. Makes no Smartlead call.
+
+    For a thread whose event was stored before classification existed, or whose C2 step failed.
+    True if a card was posted now; False if the thread already has one.
+    """
+    thread = get_thread(deps.db, thread_id)
+    if thread is None:
+        raise StepError(f"thread {thread_id} not found")
+    stored = messages_from_rows(fetch_messages(deps.db, thread_id))
+    if not any(m.direction is Direction.REPLY for m, _ in stored):
+        raise StepError(f"thread {thread_id} has no stored lead reply")
+    return handle_first_reply(deps, thread, stored, {})

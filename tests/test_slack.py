@@ -236,8 +236,14 @@ def test_valid_signature_reaches_the_handler(slack_api: AsyncMock) -> None:
 
 @pytest.mark.parametrize(
     "case",
-    ["wrong_secret", "tampered_body", "stale_timestamp", "future_timestamp", "no_signature",
-     "no_timestamp"],
+    [
+        "wrong_secret",
+        "tampered_body",
+        "stale_timestamp",
+        "future_timestamp",
+        "no_signature",
+        "no_timestamp",
+    ],
 )
 def test_bad_signatures_are_rejected_before_any_handler_runs(
     slack_api: AsyncMock, case: str
@@ -298,8 +304,12 @@ CHANNELS = [
 
 
 def test_channel_settings_are_optional_and_blank_means_unset(
-    env: None, monkeypatch: pytest.MonkeyPatch
+    env: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.chdir(tmp_path)  # not the repo root: its .env may set real channels
+    for name in CHANNELS:
+        monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
     settings = get_settings()
     assert all(getattr(settings, name) is None for name in CHANNELS)
     monkeypatch.setenv("SLACK_DRAFT_CHANNEL", "   ")

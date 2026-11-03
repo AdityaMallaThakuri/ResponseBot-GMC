@@ -5,6 +5,7 @@ Usage:
     python scripts/replay_webhook.py path/to/payload.json --url https://abc123.ngrok-free.app/webhooks/smartlead
     python scripts/replay_webhook.py --fresh        # new reply time, so it is not a duplicate
     python scripts/replay_webhook.py --check        # then read back what the pipeline stored
+    python scripts/replay_webhook.py --check-only   # no POST: just read back what is stored
 
 The secret is WEBHOOK_SECRET from .env (or --secret). It is never printed. By default the request
 carries an X-Smartlead-Signature header (sha256 HMAC of the body); --auth header|body sends the
@@ -146,8 +147,12 @@ def main(argv: list[str]) -> int:
     p.add_argument("--secret", help="override WEBHOOK_SECRET from .env")
     p.add_argument("--fresh", action="store_true", help="use the current time as the reply time")
     p.add_argument("--check", action="store_true", help="afterwards, read back what was stored")
+    p.add_argument("--check-only", action="store_true", help="send nothing, only read back")
     args = p.parse_args(argv)
 
+    if args.check_only:
+        print("\n".join(check(wait=0.0)))
+        return 0
     try:
         response = replay(args.url, args.fixture, load_secret(args.secret), args.auth, args.fresh)
     except httpx.HTTPError as exc:
