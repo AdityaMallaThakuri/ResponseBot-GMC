@@ -16,6 +16,9 @@ REQUIRED = (
 )
 
 
+DEFAULT_MODEL = "claude-haiku-5-5"
+
+
 class ConfigError(RuntimeError):
     """Raised when required configuration is missing, blank or invalid."""
 
@@ -32,12 +35,20 @@ class Settings(BaseSettings):
     SEND_ENABLED: bool = False
     CATEGORY_WRITEBACK_ENABLED: bool = False
     WEBHOOK_SECRET: str
+    # Model ids, checked against the Anthropic models docs on 2026-11-03.
+    CLASSIFIER_MODEL: str = DEFAULT_MODEL
+    DRAFT_LABEL_MODEL: str = DEFAULT_MODEL
     # Slack channels (name or id). Optional until the step that posts to them is built.
     SLACK_DRAFT_CHANNEL: str | None = None
     SLACK_LOG_CHANNEL: str | None = None
     SLACK_ALERT_CHANNEL: str | None = None
     SLACK_SHADOW_CHANNEL: str | None = None
     SLACK_OPS_CHANNEL: str | None = None
+
+    @field_validator("CLASSIFIER_MODEL", "DRAFT_LABEL_MODEL", mode="before")
+    @classmethod
+    def _blank_model_is_default(cls, value: object) -> object:
+        return DEFAULT_MODEL if isinstance(value, str) and not value.strip() else value
 
     @field_validator(*REQUIRED)
     @classmethod

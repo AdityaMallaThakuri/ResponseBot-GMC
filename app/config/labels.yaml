@@ -1,0 +1,182 @@
+# Reply labels for the AI Reply Bot. Initial set, finalised in Phase B.
+# Changing this list also needs a migration (classifications.label and
+# gold_labels.human_message_type hard-code the same names).
+# Example replies are invented for illustration. Never paste real lead text here.
+# `template` is the playbook template (or sub-template) a label normally maps to.
+labels:
+  meeting_request:
+    template: T1
+    definition: The lead asks for a call or says "sure, let's talk", or proposes a time to talk.
+    examples:
+      - "Sure, happy to hop on a call. Do you have time Thursday afternoon?"
+      - "Let's set up a quick intro call next week."
+  info_request:
+    template: T2
+    definition: The lead is interested or asks how it works, without asking about price.
+    examples:
+      - "Interesting. Can you send over more details on how this works?"
+      - "What exactly does fractional deal origination involve?"
+  free_list_request:
+    template: T3
+    definition: The lead asks for the free list of 10 to 20 targets (a sample list of buyers or companies), including a repeat "just send the list".
+    examples:
+      - "Could you share a sample list of the buyers you would target for us?"
+      - "Just send me the list and I will take a look."
+  price_question:
+    template: T4
+    definition: The lead asks only what it costs or how pricing works.
+    examples:
+      - "What is your pricing?"
+      - "How much does this cost per month?"
+  price_and_info:
+    template: T5
+    definition: The lead asks about both price and how the service works in the same message.
+    examples:
+      - "Can you tell me more about the process and what it costs?"
+      - "How does it work and what are your rates?"
+  lead_magnet_request:
+    template: T6
+    definition: The lead asks for the resource offered in the campaign (the "61 Leads In 20 Days" guide).
+    examples:
+      - "Yes please, send the 61 leads guide you mentioned."
+      - "I would like the resource you offered."
+  trial_request:
+    template: T7
+    definition: The lead accepts or directly asks for the two-week free trial. If they ask for a trial or shorter commitment only after hearing a price, use objection_price.
+    examples:
+      - "The two-week free trial sounds good, count us in."
+      - "Could we start with the free trial first?"
+  booked_confirmation:
+    template: T8
+    definition: The lead confirms a booked time, accepts an invite, or says they booked a slot.
+    examples:
+      - "I just booked a time on your calendar, talk soon."
+      - "Confirmed for Tuesday, thanks."
+  objection_info:
+    template: T2a, T2b or T2c
+    definition: >-
+      The lead pushes back with a question the playbook has an answer for: how do you find
+      transition-ready owners (T2a), we already have a broker network or deal flow team (T2b),
+      or how discreet is the outreach (T2c). Not about price.
+    examples:
+      - "We already work with a network of brokers. Why would we need this?"
+      - "How do you keep the outreach discreet for owners?"
+  objection_price:
+    template: T4a or T4b
+    definition: >-
+      The lead objects to the price (that is more than we expected, T4a) or asks for a trial or
+      shorter commitment after hearing about price (T4b).
+    examples:
+      - "That is more than we expected to spend."
+      - "Can we do a shorter commitment before signing up for the full term?"
+  not_interested:
+    template: none
+    definition: The lead politely or bluntly declines, with no request to stop all contact.
+    examples:
+      - "Thanks, but this is not a priority for us."
+      - "No thank you."
+  wrong_person:
+    template: none
+    definition: >-
+      The lead says they are not the right contact or refers someone else. Also a permanent
+      departure ("no longer with the company") or "this address is no longer monitored/used"
+      that names a replacement or new address, even when sent automatically.
+    examples:
+      - "I do not handle this. Please contact our managing partner instead."
+      - "You have the wrong person, I left that role last year."
+  out_of_office:
+    template: none
+    definition: >-
+      A temporary absence: out of office, vacation, "back on <date>", automatic or manual, even
+      if it names a colleague to contact meanwhile.
+    examples:
+      - "I am out of the office until the 14th with limited email access."
+      - "Thank you for your message. I am on leave and will reply when I return."
+  auto_reply_or_bounce:
+    template: none
+    definition: >-
+      A generic automatic message: ticket acknowledgement, delivery notice, bounce or delivery
+      failure. Not an away message and not a permanent-departure notice that names a replacement.
+    examples:
+      - "Delivery to the following recipient failed permanently."
+      - "Your request has been received and a ticket has been opened."
+  do_not_contact:
+    template: none
+    definition: The lead demands removal or no further contact, or threatens legal action or a spam complaint.
+    examples:
+      - "Remove me from your list and do not email me again."
+      - "This is spam. Stop contacting me or I will report you."
+  off_script:
+    template: none
+    definition: >-
+      Anything that fits none of the labels above, or that a person must read before any reply:
+      unclear, mixed or unusual messages, off-topic questions, or messages about a different matter.
+    examples:
+      - "Who gave you my number?"
+      - "Following up on a different matter, can you call my assistant?"
+
+# Rules added to the labeling prompt after the label list.
+rules:
+  labeling:
+    - >-
+      Label the FIRST prospect reply only. Later messages in the thread are context and must
+      never change the label of the first reply.
+    - >-
+      Temporary absence (out of office, vacation, "back on <date>", even if it names a
+      colleague) -> out_of_office.
+    - >-
+      Permanent departure ("no longer with the company") or "this address is no longer
+      monitored/used" with a named replacement or new address -> wrong_person (a referral),
+      even when sent automatically.
+    - >-
+      Generic automatic messages (ticket acknowledgements, delivery notices, bounces) ->
+      auto_reply_or_bounce.
+    - >-
+      Free list vs lead magnet: look at what the outreach email offered. If it offered a list
+      of targets and the lead says yes or "send it" -> free_list_request (T3). If it offered a
+      document, guide, strategy doc, report or case study and the lead says yes or "send it" ->
+      lead_magnet_request (T6). A general "tell me more" or "how does it work" is info_request
+      (T2).
+  verdict:
+    - >-
+      The lead_verdict is relative to the campaign. The target audience is whatever the outreach
+      email and campaign name aim at (for example franchisors, acquirers, medical device
+      companies, M&A advisors). pass = the lead is in that audience, or routes us to someone who
+      is, with authority to buy. Do not assume the audience is M&A firms. hard_dq means the bot
+      will never reply, so use it only when the thread itself clearly shows the person is not a
+      buyer (for example a job seeker, a student, or a vendor selling to us, or a company that
+      says it is outside what we do). If the person engages with the offer, asks about our
+      service, or says they are evaluating outbound or lead-generation providers, use flag,
+      never hard_dq. When in doubt between flag and hard_dq, use flag.
+    - >-
+      If the target audience is unclear from the outreach email, say so in the evidence and use
+      flag with lower confidence.
+    - >-
+      A positive or curious reply is never off_script or hard_dq just because it is short, long
+      or vague.
+
+# Playbook templates, used as the one-line guide in the labeling prompt.
+templates:
+  T1: Meeting request. The lead asks for a call or says "sure, let's talk"; the reply proposes two CST time slots plus the calendar link.
+  T2: Info request or interested. The lead asks how it works or is interested; the reply explains the offer briefly and asks for a call.
+  T2a: Objection, how do you find transition-ready owners.
+  T2b: Objection, we already have a broker network or deal flow team.
+  T2c: Objection, how discreet is the outreach.
+  T3: Free list. The lead asks for the free list of 10 to 20 targets; the reply says a quick call is needed to learn their deal box.
+  T3a: Objection, just send the list.
+  T4: Price. The lead asks about price; the reply says pricing depends (retainer plus success fee) and asks for a call.
+  T4a: Objection, that is more than we expected.
+  T4b: Objection, can we do a trial or shorter commitment.
+  T5: Price and info combined, first variant.
+  T5b: Price and info combined, second variant.
+  T6: Lead magnet request. The lead asks for the resource ("61 Leads In 20 Days"); the reply sends the link and asks for a call.
+  T7: Two-week free trial. The lead accepts or asks for the trial; the reply asks for 15 to 20 minutes to learn their deal box.
+  T8: Booked. The lead confirms a booked time; the reply confirms the calendar invite was sent.
+
+# Lead verdict, set alongside the label by the labeling script. Working definitions; final
+# rules come later from Aryan and Ray. It is about the LEAD and COMPANY, not how they replied:
+# a "not interested" from a good-fit lead is still pass.
+verdicts:
+  pass: Plausibly buys Gamic's service and has authority, or is routing us to the decision-maker.
+  flag: Unclear fit, not enough information, or a gatekeeper. When unsure, use flag, never pass.
+  hard_dq: The thread itself clearly shows the person is not a buyer (job seeker, student, a vendor selling to us, or a company that says it is outside what we do). The bot never replies to hard_dq, so when in doubt use flag.

@@ -5,3 +5,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+
+# Real lead data and generated reports: never commit
+eval/data/
+eval/reports/
