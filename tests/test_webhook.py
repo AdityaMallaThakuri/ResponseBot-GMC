@@ -161,6 +161,74 @@ def test_the_secret_is_never_stored(client: TestClient, db: FakeDb) -> None:
     assert "secret_key" not in stored and SECRET not in json.dumps(rows(db, "raw_events"))
 
 
+def test_a_valid_query_secret_is_accepted(client: TestClient, db: FakeDb) -> None:
+    response = client.post(f"{URL}?secret={SECRET}", json=EVENT)
+    assert response.status_code == 200 and response.json()["status"] == "accepted"
+    assert len(rows(db, "raw_events")) == 1
+
+
+def test_a_wrong_query_secret_is_rejected(client: TestClient, db: FakeDb) -> None:
+    for query in ("secret=wrong", "secret=", f"secret={SECRET}&secret=wrong"):
+        assert client.post(f"{URL}?{query}", json=EVENT).status_code == 401
+    assert rows(db, "raw_events") == []
+
+
+def test_no_secret_at_all_is_still_rejected(client: TestClient, db: FakeDb) -> None:
+    assert client.post(f"{URL}?other=1", json=EVENT).status_code == 401
+    assert rows(db, "raw_events") == []
+
+
+def test_every_secret_that_is_present_must_be_valid(client: TestClient, db: FakeDb) -> None:
+    body = json.dumps(EVENT).encode()
+    bad_query = client.post(f"{URL}?secret=wrong", content=body, headers=sign(body))
+    assert bad_query.status_code == 401
+    bad_header = client.post(
+        f"{URL}?secret={SECRET}", json=EVENT, headers={"X-Webhook-Secret": "wrong"}
+    )
+    assert bad_header.status_code == 401
+    assert rows(db, "raw_events") == []
+
+
+def test_the_query_secret_is_never_stored(client: TestClient, db: FakeDb) -> None:
+    assert client.post(f"{URL}?secret={SECRET}", json=EVENT).status_code == 200
+    assert SECRET not in json.dumps(rows(db, "raw_events"), default=str)
+    assert SECRET not in json.dumps(db.tables, default=str)
+
+
+def test_the_query_secret_never_appears_in_logs(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    client.post(f"{URL}?secret={SECRET}", json=EVENT)  # accepted
+    client.post(f"{URL}?secret={SECRET}x", json=EVENT)  # rejected
+    # httpx's own client-side request log is the test harness, not the app
+    ours = [r.getMessage() for r in caplog.records if not r.name.startswith("httpx")]
+    assert ours and SECRET not in " ".join(ours)
+
+
+def test_uvicorn_access_log_lines_are_redacted(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    from app.ingest.log_redact import install_redaction
+
+    install_redaction()
+    caplog.set_level(logging.INFO, logger="uvicorn.access")
+    access = logging.getLogger("uvicorn.access")
+    propagate, access.propagate = access.propagate, True
+    try:
+        access.info(
+            '%s - "%s %s HTTP/%s" %d',
+            "1.2.3.4:5",
+            "POST",
+            f"{URL}?secret={SECRET}&x=1",
+            "1.1",
+            200,
+        )
+    finally:
+        access.propagate = propagate
+    assert "secret=[redacted]&x=1" in caplog.text and SECRET not in caplog.text
+
+
 def test_unreadable_body_with_a_valid_secret_is_a_400(client: TestClient, db: FakeDb) -> None:
     headers = {"X-Webhook-Secret": SECRET}
     assert client.post(URL, content=b"not json", headers=headers).status_code == 400

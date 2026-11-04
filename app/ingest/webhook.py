@@ -3,7 +3,9 @@
 Nothing in this step sends, unsubscribes, classifies or posts to Slack.
 
 Order of checks, cheapest first:
-1. Authenticate with WEBHOOK_SECRET. Bad or missing: 401, and nothing from the body is logged.
+1. Authenticate with WEBHOOK_SECRET (signature header, secret header, secret_key body field or
+   ?secret= query parameter; any that is present must be valid). Bad or missing: 401, and nothing
+   from the body or query string is logged.
 2. Only EMAIL_REPLY events. Anything else: 200 and a log line, not stored.
 3. Only campaigns in GMC_CAMPAIGN_IDS. Anything else: 200 and a log line, not stored.
 4. Store the raw payload (without any secret_key) in raw_events. A repeat delivery is a 200
@@ -17,7 +19,7 @@ import hashlib
 import hmac
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException, Request
@@ -28,6 +30,7 @@ from app.config.settings import get_settings
 from app.db.client import insert_raw_event, record_event_error
 from app.db.records import NewRawEvent, RawSource, payload_hash
 from app.ingest.deps import IngestDeps, build_deps
+from app.ingest.log_redact import QUERY_SECRET_PARAM
 from app.ingest.process import process_reply_event
 
 logger = logging.getLogger(__name__)
@@ -37,6 +40,7 @@ HANDLED_EVENT_TYPES = frozenset({"EMAIL_REPLY"})
 SIGNATURE_HEADER = "x-smartlead-signature"  # "sha256=<hex hmac of the raw body>"
 SECRET_HEADER = "x-webhook-secret"  # the secret itself, for senders that can set a header
 SECRET_BODY_FIELD = "secret_key"  # the secret itself, as a field in the JSON body
+SECRET_QUERY_PARAM = QUERY_SECRET_PARAM  # the secret itself, as ?secret=... (never logged)
 
 # Fields that identify one reply event, in the order they are tried. Smartlead's documentation
 # for EMAIL_REPLY is inconsistent between pages and no real delivery has been captured yet, so
@@ -101,25 +105,32 @@ def _equal(a: str, b: str) -> bool:
 
 
 def is_authentic(
-    body: bytes, headers: Mapping[str, str], payload: dict[str, Any] | None, secret: str
+    body: bytes,
+    headers: Mapping[str, str],
+    payload: dict[str, Any] | None,
+    secret: str,
+    query_secrets: Sequence[str] | None = None,
 ) -> bool:
     """True when the request proves knowledge of the secret. Constant-time comparisons.
 
-    The first of these that is present must be valid: the HMAC signature header, the secret
-    header, the secret_key body field. Which one Smartlead sends is not yet confirmed.
+    Every credential that is present must be valid, and at least one must be present: the HMAC
+    signature header, the secret header, the secret_key body field, the ?secret= query parameter.
+    Which one Smartlead sends is not yet confirmed. A present but empty query value is invalid.
     """
+    checks: list[bool] = []
     signature = headers.get(SIGNATURE_HEADER)
     if signature:
         expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
         given = signature.strip()
-        return _equal(given, f"sha256={expected}") or _equal(given, expected)
+        checks.append(_equal(given, f"sha256={expected}") or _equal(given, expected))
     header_secret = headers.get(SECRET_HEADER)
     if header_secret:
-        return _equal(header_secret.strip(), secret)
+        checks.append(_equal(header_secret.strip(), secret))
     body_secret = (payload or {}).get(SECRET_BODY_FIELD)
     if isinstance(body_secret, str) and body_secret:
-        return _equal(body_secret, secret)
-    return False
+        checks.append(_equal(body_secret, secret))
+    checks.extend(_equal(value, secret) for value in query_secrets or ())
+    return bool(checks) and all(checks)
 
 
 def get_deps(app: FastAPI) -> IngestDeps:
@@ -152,7 +163,8 @@ async def smartlead_webhook(request: Request, background: BackgroundTasks) -> JS
     body = await request.body()
     payload = _parse_json(body)
 
-    if not is_authentic(body, request.headers, payload, settings.WEBHOOK_SECRET):
+    query_secrets = request.query_params.getlist(SECRET_QUERY_PARAM)
+    if not is_authentic(body, request.headers, payload, settings.WEBHOOK_SECRET, query_secrets):
         logger.warning("smartlead webhook rejected: bad or missing secret")
         raise HTTPException(status_code=401, detail="unauthorized")
     if payload is None:

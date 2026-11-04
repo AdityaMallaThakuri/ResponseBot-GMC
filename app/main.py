@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.config.settings import get_settings
+from app.ingest.log_redact import install_redaction
 from app.ingest.webhook import get_deps
 from app.ingest.webhook import router as webhook_router
 from app.send.sender import SendConfig, SendService
@@ -18,6 +19,7 @@ from app.templates.playbook import load_playbook
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()  # fail fast at startup if configuration is incomplete
+    install_redaction()  # keep ?secret=... out of uvicorn's access log
     if not settings.gmc_campaign_ids:
         logging.getLogger(__name__).warning(
             "GMC_CAMPAIGN_IDS is empty: every Smartlead webhook will be ignored"
