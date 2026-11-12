@@ -61,6 +61,8 @@ def view_from_row(row: Row) -> tuple[Route | None, DraftView]:
     if row["template_id"] == EXAMPLES_TEMPLATE_ID:
         if placeholders(text):
             notes = (*notes, "Fill in " + ", ".join(placeholders(text)) + " before you send.")
+        if result.get("price_confirmed") is False:
+            notes = (*notes, "Price not confirmed: check with Aryan.")
         removed = int(result.get("removed_sentences") or 0)
         if removed:
             notes = (
@@ -121,6 +123,7 @@ def _prepare_from_examples(
                 "warnings": [],
                 "flagged": list(outcome.flagged),
                 "removed_sentences": outcome.removed,
+                "price_confirmed": outcome.price_confirmed,
             },
         ),
     )

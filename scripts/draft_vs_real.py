@@ -87,7 +87,8 @@ def block(i: int, r: dict[str, Any]) -> str:
             f"- Thread: {r['thread_id']}  |  label: {r['gold']}  |  "
             f"**similarity {r['score']:.1f}**  |  closest example unchanged: {r['baseline']:.1f}",
             f"- Examples used: {', '.join(r['example_ids'])}",
-            f"- Figures in our draft: {figures}  |  sentences removed for a figure: {r['removed']}",
+            f"- Figures in our draft: {figures}  |  sentences removed for a figure: {r['removed']}"
+            f"  |  price confirmed: {r['price_confirmed']}",
             "",
             "**Prospect reply**",
             "",
@@ -167,7 +168,9 @@ def main() -> None:
         )
         for e in history
     ]
-    drafter = ExampleDrafter(lambda label: pool, client, settings.DRAFT_MODEL)
+    drafter = ExampleDrafter(
+        lambda label: pool, client, settings.DRAFT_MODEL, settings.PRICE_SENTENCE
+    )
 
     data = {r["thread_id"]: r for r in read_csv(DATA / "gmc_all_replies_dataset.csv")}
     rows = pick_rows(read_csv(DATA / "gold_set.csv"), data, args.count, args.seed)
@@ -213,6 +216,7 @@ def main() -> None:
                 "baseline": similarity(closest[0].gamic_reply, real) if closest else 0.0,
                 "flagged": outcome.flagged,
                 "removed": outcome.removed,
+                "price_confirmed": outcome.price_confirmed,
                 "example_ids": outcome.example_ids,
             }
         )

@@ -17,7 +17,10 @@ from app.examples.drafter import (
     build_user_message,
     clean_draft,
     flag_figures,
+    insert_price_sentence,
+    latest_price_sentence,
     price_wording,
+    replace_days,
 )
 from app.examples.history import history_examples, label_map
 from app.examples.learn import learn_once, matches_step, sent_after_first_reply, step_texts
@@ -180,8 +183,12 @@ def reply_with(text: str) -> FakeModel:
     return FakeModel(answer={"reply": text})
 
 
-def drafter(model: FakeModel, pool: list[Example] | None = None) -> ExampleDrafter:
-    return ExampleDrafter(lambda label: pool if pool is not None else [ex(1), ex(2)], model, "m-x")
+def drafter(
+    model: FakeModel, pool: list[Example] | None = None, price_sentence: str = ""
+) -> ExampleDrafter:
+    return ExampleDrafter(
+        lambda label: pool if pool is not None else [ex(1), ex(2)], model, "m-x", price_sentence
+    )
 
 
 THREAD = {"campaign_name": "GMC - M&A May", "lead_first_name": "Pat"}
@@ -271,26 +278,148 @@ def test_clock_times_are_never_allowed() -> None:
     assert "10am" not in out.text and "[TIME OPTIONS]" in out.text and out.removed == 1
 
 
-def test_price_replies_get_the_recent_price_wording_and_may_state_that_range() -> None:
-    model = reply_with("Hey Pat. Pricing is typically $2,000 to $4,000 per month for most firms.")
-    out = draft_with(drafter(model, pool=price_pool()), label="price_question")
+PRICE_SENTENCE = "Pricing is a monthly retainer of $3,000 plus a success fee of 5%."
+
+
+def test_the_price_sentence_setting_is_inserted_word_for_word_and_confirmed() -> None:
+    model = reply_with("Hey Pat.\n\n[PRICE SENTENCE]\n\nHappy to chat.")
+    out = draft_with(
+        drafter(model, pool=price_pool(), price_sentence=PRICE_SENTENCE), label="price_question"
+    )
+    assert PRICE_SENTENCE in out.text and "[PRICE SENTENCE]" not in out.text
+    assert out.price_confirmed is True and out.removed == 0
+    assert out.flagged == ("$3,000", "5%")
     user = model.calls[0]["messages"][0]["content"]
     rule = user.split("<number_rule>")[1].split("</number_rule>")[0]
-    assert "$2,000 to $4,000 per month" in rule and "$9,000" not in rule
-    assert out.removed == 0 and "$2,000" in out.flagged[0]
+    assert "[PRICE SENTENCE]" in rule and "Never write a price" in rule
+    assert "$2,000" not in rule  # the model is not shown any price wording
 
 
-def test_a_price_not_in_the_examples_is_removed_even_for_price_labels() -> None:
+def test_a_price_the_model_writes_itself_is_removed_and_the_set_sentence_used() -> None:
     model = reply_with("Hey Pat.\nIt costs $500 a month.\nHappy to chat.")
-    out = draft_with(drafter(model, pool=price_pool()), label="price_and_info")
-    assert "$500" not in out.text and out.removed == 1 and "Happy to chat." in out.text
+    out = draft_with(
+        drafter(model, pool=price_pool(), price_sentence=PRICE_SENTENCE), label="price_and_info"
+    )
+    assert "$500" not in out.text and out.removed == 1
+    # no marker was written, so the sentence goes after the first body paragraph
+    assert (
+        out.text == "Hey Pat.\n" + PRICE_SENTENCE + "\nHappy to chat." or PRICE_SENTENCE in out.text
+    )
 
 
-def test_without_any_price_wording_the_model_is_told_not_to_state_one() -> None:
-    model = reply_with("Hey Pat, pricing depends on scope.")
+def test_the_sentence_goes_after_the_greeting_and_first_paragraph_when_no_marker() -> None:
+    text = "Hey Pat,\n\nThanks for asking.\n\nWould [TIME OPTIONS] work?"
+    out = insert_price_sentence(text, "SENTENCE.")
+    assert out.split("\n\n") == [
+        "Hey Pat,",
+        "Thanks for asking.",
+        "SENTENCE.",
+        "Would [TIME OPTIONS] work?",
+    ]
+    assert insert_price_sentence("[PRICE SENTENCE] and [PRICE SENTENCE]", "S.") == "S. and "
+    assert "[PRICE SENTENCE]" not in insert_price_sentence("Hi\n\n[PRICE SENTENCE]\n\nBye", "")
+
+
+def test_without_a_setting_the_newest_library_price_sentence_is_used_and_marked() -> None:
+    model = reply_with("Hey Pat.\n[PRICE SENTENCE]\nHappy to chat.")
+    out = draft_with(drafter(model, pool=price_pool()), label="price_question")
+    assert PRICE_REPLY in out.text  # p2 is the newest price reply with a figure
+    assert out.price_confirmed is False
+    assert (
+        latest_price_sentence(price_pool(), exclude_thread_id="p2")
+        == "Another one at $3,000 monthly."
+    )
+
+
+def test_with_no_sentence_anywhere_the_model_is_told_to_state_no_price() -> None:
+    model = reply_with("Hey Pat, pricing depends on scope. [PRICE SENTENCE]")
     pool = [Example("history", "x", "GMC - M&A", "price_question", "q", "No figure here.", T0)]
-    draft_with(drafter(model, pool=pool), label="price_question")
-    assert "No price wording is available" in model.calls[0]["messages"][0]["content"]
+    out = draft_with(drafter(model, pool=pool), label="price_question")
+    assert "No price sentence is available" in model.calls[0]["messages"][0]["content"]
+    assert "[PRICE SENTENCE]" not in out.text and out.price_confirmed is False
+
+
+def test_other_labels_never_get_a_price_sentence() -> None:
+    out = draft_with(drafter(reply_with("Hey Pat. [PRICE SENTENCE] Bye."), price_sentence="X."))
+    assert "X." not in out.text and "[PRICE SENTENCE]" not in out.text
+    assert out.price_confirmed is None
+
+
+# ---- numbers that appear in our outreach or in the same campaign's replies are allowed
+
+FREE_PILOT = "GMC - M&A (Free Pilot) V1"
+PILOT_REPLY = "Sounds good, we only have 2 weeks so I need 15-20 minutes to get your deal box."
+
+
+def pilot_pool() -> list[Example]:
+    return [
+        Example("history", "a", FREE_PILOT, "trial_request", "yes", PILOT_REPLY, T0),
+        Example("history", "b", "GMC - PE Aug", "trial_request", "yes", "We need 45 minutes.", T0),
+    ]
+
+
+def pilot(text: str, **over: Any):
+    return draft_with(
+        drafter(reply_with(text), pool=pilot_pool()),
+        thread={"campaign_name": FREE_PILOT, "lead_first_name": "Pat"},
+        label="trial_request",
+        reply="Yes, I am interested in the pilot.",
+        outreach="Free pilot, nothing to lose.",
+        **over,
+    )
+
+
+def test_a_number_from_a_reply_in_the_same_campaign_is_allowed() -> None:
+    out = pilot("Hey Pat.\nWe only have 2 weeks, so I need 15-20 minutes.")
+    assert out.removed == 0 and "2 weeks" in out.text and "15-20 minutes" in out.text
+    assert out.flagged == ("2", "15", "20")
+
+
+def test_a_number_that_only_other_campaigns_use_stays_blocked() -> None:
+    out = pilot("Hey Pat.\nI need 45 minutes. Happy to chat.")
+    assert out.removed == 1 and "45" not in out.text and "Happy to chat." in out.text
+
+
+def test_the_threads_own_answer_is_not_a_same_campaign_source() -> None:
+    out = pilot("Hey Pat.\nWe only have 2 weeks. Happy to chat.", exclude_thread_id="a")
+    assert out.removed == 1 and "2 weeks" not in out.text
+
+
+def test_a_number_in_the_outreach_email_we_sent_is_allowed() -> None:
+    out = draft_with(
+        drafter(reply_with("Hey Pat.\nAs I said, we found 50 targets for you.")),
+        outreach="I can pull 50 in Texas showing signs. Want them?",
+    )
+    assert out.removed == 0 and "50 targets" in out.text
+
+
+# ---- day words used for scheduling
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Does tomorrow at 9am or friday at 10:30am work?", "Does [TIME OPTIONS] work?"),
+        ("Would Monday or Tuesday work for a call?", "Would [TIME OPTIONS] work for a call?"),
+        ("Does tomorrow or thursday at [TIME OPTIONS] work?", "Does [TIME OPTIONS] work?"),
+        ("Free today for a quick chat.", "Free [TIME OPTIONS] for a quick chat."),
+        ("How about Friday at 3pm?", "How about [TIME OPTIONS]?"),
+    ],
+)
+def test_scheduling_day_words_become_time_options(text: str, expected: str) -> None:
+    assert replace_days(text) == expected
+
+
+def test_day_words_outside_scheduling_are_left_alone() -> None:
+    plain = "We launched on Monday and it grew. Today the list is live."
+    assert replace_days(plain) == plain
+
+
+def test_a_drafted_reply_never_keeps_a_day_or_clock_time() -> None:
+    out = draft_with(
+        drafter(reply_with("Hey Pat.\nDoes tomorrow at 9am or Friday at 2pm work for a call?"))
+    )
+    assert out.text == "Hey Pat.\nDoes [TIME OPTIONS] work for a call?" and out.removed == 0
 
 
 def test_no_draft_below_confidence_without_examples_on_error_or_empty_answer() -> None:

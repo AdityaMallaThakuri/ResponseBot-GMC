@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     # The learning loop reads threads from Smartlead (read only) this often, in minutes, and saves
     # the replies Ray sent as new examples. 0 turns the loop off.
     LEARN_INTERVAL_MINUTES: int = 30
+    # The price sentence for price_question and price_and_info drafts, inserted word for word.
+    # Empty: the most recent price sentence in the example library is used and the card says
+    # "Price not confirmed: check with Aryan".
+    PRICE_SENTENCE: str = ""
     # Slack channels (name or id). Optional until the step that posts to them is built.
     SLACK_DRAFT_CHANNEL: str | None = None
     SLACK_LOG_CHANNEL: str | None = None

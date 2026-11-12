@@ -75,7 +75,10 @@ def build_deps(settings: Settings) -> IngestDeps:
         classifier=Classifier(claude, settings.CLASSIFIER_MODEL),
         slack=WebClient(token=settings.SLACK_BOT_TOKEN),
         example_drafter=ExampleDrafter(
-            lambda label: load_pool(db, label), claude, settings.DRAFT_MODEL
+            lambda label: load_pool(db, label),
+            claude,
+            settings.DRAFT_MODEL,
+            settings.PRICE_SENTENCE,
         ),
         config=IngestConfig.from_settings(settings),
     )
