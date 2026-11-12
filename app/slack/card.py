@@ -151,6 +151,8 @@ def smartlead_thread_url(lead_map_id: object) -> str | None:
     except (TypeError, ValueError):
         return None
     return SMARTLEAD_THREAD_URL.format(number) if number > 0 else None
+
+
 FENCE = "`" * 3
 
 
@@ -230,7 +232,8 @@ def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
         },
     ]
     if card.draft_text is not None:
-        text = f"*Draft reply* (copy it)\n{code_block(card.draft_text)}"
+        words = len(card.draft_text.split())
+        text = f"*Draft reply* (copy it, {words} words)\n{code_block(card.draft_text)}"
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": text}})
     if card.thread_url:
         link = f"<{escape_mrkdwn(card.thread_url)}|Open thread in Smartlead>"

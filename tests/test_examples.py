@@ -16,6 +16,7 @@ from app.examples.drafter import (
     ExampleDrafter,
     build_user_message,
     clean_draft,
+    ensure_link,
     flag_figures,
     insert_price_sentence,
     latest_price_sentence,
@@ -44,6 +45,9 @@ from tests.test_webhook import EVENT, HISTORY, NOW, FakeSmartlead, rows
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
+FILLER = " ".join(["word"] * 30)  # examples are long enough for the length cap
+
+
 def ex(n: int, label: str = "info_request", campaign: str = "GMC - M&A May", days: int = 0, **kw):
     return Example(
         source=kw.get("source", "history"),
@@ -51,7 +55,7 @@ def ex(n: int, label: str = "info_request", campaign: str = "GMC - M&A May", day
         campaign_name=campaign,
         label=label,
         prospect_reply=f"question {n}",
-        gamic_reply=f"answer {n}",
+        gamic_reply=f"answer {n} " + FILLER,
         replied_at=T0 + timedelta(days=days),
     )
 
@@ -132,7 +136,7 @@ def new_example(thread_id: str = "t1", label: str = "info_request", **kw: Any) -
         source_thread_id=thread_id,
         label=label,
         prospect_reply="q",
-        gamic_reply=kw.pop("gamic_reply", "a"),
+        gamic_reply=kw.pop("gamic_reply", "a " + FILLER),
         campaign_name="GMC - M&A",
         replied_at=T0,
         **kw,
@@ -812,3 +816,15 @@ def test_if_the_sequence_cannot_be_read_nothing_is_guessed() -> None:
     result = learn_once(deps, now=NOW)
     assert (result.errors, result.learned) == (1, 0)
     assert not [r for r in rows(deps.db, "reply_examples") if r["source"] == "ray_sent"]
+
+
+def test_a_booking_line_without_a_link_gets_the_placeholder() -> None:
+    text = "Hey,\n\nWould [TIME OPTIONS] work?\n\nIf not, just grab a time over here.\n\nBest,"
+    fixed = ensure_link(text)
+    assert "If not, just grab a time over here [LINK]." in fixed
+    assert fixed.count("[LINK]") == 1 and "Would [TIME OPTIONS] work?" in fixed
+
+
+def test_a_booking_line_that_has_the_link_is_left_alone() -> None:
+    text = "If not, just grab a time over here [LINK].\n\nWe launched a call last week."
+    assert ensure_link(text) == text

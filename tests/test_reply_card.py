@@ -79,7 +79,7 @@ def test_the_draft_is_a_copy_friendly_code_block() -> None:
         card(draft_text=f"Hi Jane,\n\nSounds good <3 & more\n{fence}x{fence}")
     )
     shown = next(b for b in blocks if b["type"] == "section" and "Draft reply" in b["text"]["text"])
-    body = shown["text"]["text"].split("(copy it)\n", 1)[1]
+    body = shown["text"]["text"].split(" words)\n", 1)[1]
     assert body.startswith(fence) and body.endswith(fence)
     assert "&lt;3 &amp; more" in body and "'''x'''" in body  # escaped, no nested fence
     assert body.count(fence) == 2
@@ -154,8 +154,16 @@ def test_the_card_links_to_the_thread_in_smartlead() -> None:
     url = smartlead_thread_url("3966392897")
     assert url == "https://app.smartlead.ai/app/master-inbox?action=INBOX&leadMap=3966392897"
     card = ReplyCard(
-        thread_ref="t", lead_name="A", campaign="GMC - X", reply="hi", lane="draft",
-        label="info_request", confidence=0.9, reason="r", draft_text="Hey", thread_url=url,
+        thread_ref="t",
+        lead_name="A",
+        campaign="GMC - X",
+        reply="hi",
+        lane="draft",
+        label="info_request",
+        confidence=0.9,
+        reason="r",
+        draft_text="Hey",
+        thread_url=url,
     )
     text = str(build_reply_card_blocks(card))
     assert "<https://app.smartlead.ai/app/master-inbox?action=INBOX&amp;leadMap=3966392897" in text

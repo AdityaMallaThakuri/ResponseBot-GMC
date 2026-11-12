@@ -4,35 +4,45 @@ An Example is a prospect's first reply and the reply Gamic actually sent. The li
 the reply_examples table (source "history" for the past dataset, "ray_sent" for replies Ray sent
 after we posted a draft) and read back here. New examples count immediately.
 
-Selection (select_examples): the 5 closest, ordered by same label first, then same campaign
-family, then most recent. The family is the first word after "GMC - " ("M&A" for
-"GMC - M&A June (US/Canada)").
+Selection (select_examples): the 5 closest, ordered by same label first, then priority (SOP
+templates), then sent in the last RECENT_DAYS days (Ray's current style wins), then same campaign
+family, then similarity of the prospect's reply to the new one, then most recent. The family is
+the first word after "GMC - " ("M&A" for "GMC - M&A June (US/Canada)").
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any
 
 from app.db.client import Database, fetch_examples_for_label, fetch_recent_examples
+from app.examples.similarity import similarity
 
 K_EXAMPLES = 5
+RECENT_DAYS = 60
 _FAMILY_PREFIX = re.compile(r"^\s*gmc\s*[-–]\s*", re.IGNORECASE)
 _EPOCH = datetime.min.replace(tzinfo=UTC)
 
 
 @dataclass(frozen=True)
 class Example:
-    source: str  # "history" or "ray_sent"
+    source: str  # "history", "ray_sent", "smartlead_sync" or "sop"
     source_thread_id: str
     campaign_name: str
     label: str
     prospect_reply: str
     gamic_reply: str
     replied_at: datetime | None = None
+    sent_at: datetime | None = None
+    priority: int = 0
+
+    @property
+    def when(self) -> datetime:
+        """When Gamic sent this reply (the prospect's reply time if the send time is unknown)."""
+        return self.sent_at or self.replied_at or _EPOCH
 
 
 def campaign_family(campaign_name: str) -> str:
@@ -48,13 +58,17 @@ def select_examples(
     *,
     k: int = K_EXAMPLES,
     exclude_thread_id: str | None = None,
+    reply: str = "",
+    now: datetime | None = None,
 ) -> list[Example]:
-    """The k closest examples: same label, then same campaign family, then the most recent."""
+    """The k closest examples (see the module docstring for the order)."""
     family = campaign_family(campaign_name)
+    cutoff = (now or datetime.now(UTC)) - timedelta(days=RECENT_DAYS)
 
-    def closeness(ex: Example) -> tuple[bool, bool, datetime]:
+    def closeness(ex: Example) -> tuple[bool, int, bool, bool, float, datetime]:
         same_family = bool(family) and campaign_family(ex.campaign_name) == family
-        return (ex.label == label, same_family, ex.replied_at or _EPOCH)
+        close = similarity(reply, ex.prospect_reply) if reply else 0.0
+        return (ex.label == label, ex.priority, ex.when >= cutoff, same_family, close, ex.when)
 
     usable = [
         ex
@@ -92,6 +106,8 @@ def example_from_row(row: dict[str, Any]) -> Example:
         prospect_reply=row["prospect_reply"],
         gamic_reply=row["gamic_reply"],
         replied_at=parse_time(row.get("replied_at")),
+        sent_at=parse_time(row.get("sent_at")),
+        priority=int(row.get("priority") or 0),
     )
 
 

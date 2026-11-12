@@ -204,6 +204,8 @@ class NewDraft:
 class ExampleSource(StrEnum):
     HISTORY = "history"  # loaded from the past replies dataset
     RAY_SENT = "ray_sent"  # learned from a reply Ray sent after we posted a draft
+    SMARTLEAD_SYNC = "smartlead_sync"  # read from Smartlead by scripts/sync_examples.py
+    SOP = "sop"  # a reply template from Ray's SOP file
 
 
 @dataclass(frozen=True)
@@ -220,6 +222,8 @@ class NewExample:
     thread_id: str | None = None
     draft_id: str | None = None
     draft_similarity: float | None = None  # 0 to 100: our draft against what Ray sent
+    sent_at: datetime | None = None  # when Gamic's reply was sent
+    priority: int = 0  # higher wins within a label (SOP templates)
 
 
 @dataclass(frozen=True)

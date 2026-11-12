@@ -11,6 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from app.config.settings import get_settings
 from app.db.client import fetch_announced_campaign_ids, record_announced_campaign
 from app.examples.learn import learn_once
+from app.examples.sync import sync_once
 from app.ingest.log_redact import install_redaction
 from app.ingest.webhook import get_deps
 from app.ingest.webhook import router as webhook_router
@@ -31,6 +32,18 @@ async def learning_loop(app: FastAPI, minutes: int) -> None:
             await run_in_threadpool(learn_once, get_deps(app))
         except Exception as exc:  # noqa: BLE001 - keep looping; the next run tries again
             log.error("learning loop run failed: %s", type(exc).__name__)
+
+
+async def sync_loop(app: FastAPI, minutes: int) -> None:
+    """Every `minutes` (daily by default), read new replies Ray sent from Smartlead (read only) and
+    store them as examples. The first run is one interval after startup: do the first big sync
+    by hand with scripts/sync_examples.py. Never raises."""
+    while True:
+        await asyncio.sleep(minutes * 60)
+        try:
+            await run_in_threadpool(sync_once, get_deps(app), get_settings())
+        except Exception as exc:  # noqa: BLE001 - keep looping; the next run tries again
+            log.error("example sync run failed: %s", type(exc).__name__)
 
 
 WEBHOOK_JOB_MINUTES = 60
@@ -97,13 +110,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     task = None
     if settings.LEARN_INTERVAL_MINUTES > 0:
         task = asyncio.create_task(learning_loop(app, settings.LEARN_INTERVAL_MINUTES))
+    sync_task = None
+    if settings.SYNC_INTERVAL_MINUTES > 0:
+        sync_task = asyncio.create_task(sync_loop(app, settings.SYNC_INTERVAL_MINUTES))
     job_task = None
     if settings.PUBLIC_BASE_URL.strip():
         job_task = asyncio.create_task(webhook_job_loop(app))
     else:
         log.info("PUBLIC_BASE_URL is not set: the webhook attach job is off")
     yield
-    for t in (task, job_task):
+    for t in (task, sync_task, job_task):
         if t is not None:
             t.cancel()
             with suppress(asyncio.CancelledError):

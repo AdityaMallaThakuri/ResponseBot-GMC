@@ -406,6 +406,11 @@ def fetch_recent_examples(db: Database, limit: int = 300) -> list[Row]:
     return _select(db, "reply_examples", {}, order="replied_at", desc=True, limit=limit)
 
 
+def fetch_all_examples(db: Database) -> list[Row]:
+    """Every example (for the sync's "already in the library" check)."""
+    return _select(db, "reply_examples", {}, order="created_at", desc=True)
+
+
 def find_example_for_draft(db: Database, draft_id: str) -> Row | None:
     return _first(db, "reply_examples", {"draft_id": draft_id})
 

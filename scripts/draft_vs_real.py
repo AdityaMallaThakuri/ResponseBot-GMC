@@ -15,6 +15,7 @@ Anthropic API: never Smartlead, never Slack, never the database, nothing is sent
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import re
 import statistics
@@ -87,6 +88,8 @@ def block(i: int, r: dict[str, Any]) -> str:
             f"- Thread: {r['thread_id']}  |  label: {r['gold']}  |  "
             f"**similarity {r['score']:.1f}**  |  closest example unchanged: {r['baseline']:.1f}",
             f"- Examples used: {', '.join(r['example_ids'])}",
+            f"- Words: draft {r['draft_words']} | real {r['real_words']} | cap {r['word_limit']}"
+            f"  |  length fix: {r['length_fix'] or 'none'}",
             f"- Figures in our draft: {figures}  |  sentences removed for a figure: {r['removed']}"
             f"  |  price confirmed: {r['price_confirmed']}",
             "",
@@ -121,6 +124,9 @@ def summary(results: list[dict[str, Any]], failed: list[str]) -> list[str]:
         f" (median {statistics.median(scores):.1f}, lowest {min(scores):.1f}, "
         f"highest {max(scores):.1f})",
         f"Yardstick, the closest example sent unchanged: average {statistics.mean(base):.1f}",
+        f"Average words: draft {statistics.mean(r['draft_words'] for r in results):.0f}, "
+        f"real reply {statistics.mean(r['real_words'] for r in results):.0f}; length fixes: "
+        f"{sum(1 for r in results if r['length_fix'])}",
         f"Drafts with a number, price or percentage to check: "
         f"{sum(1 for r in results if r['flagged'])}",
         f"Sentences removed for a number that is not allowed: "
@@ -147,9 +153,9 @@ def main() -> None:
 
     from app.classify.classifier import clean_reply
     from app.config.settings import get_settings
-    from app.examples.drafter import ExampleDrafter
+    from app.examples.drafter import ExampleDrafter, word_count
     from app.examples.history import load_history, read_csv
-    from app.examples.library import Example, select_examples
+    from app.examples.library import Example, parse_time, select_examples
     from app.examples.similarity import similarity
 
     settings = get_settings()
@@ -165,11 +171,34 @@ def main() -> None:
             e.prospect_reply,
             e.gamic_reply,
             e.replied_at,
+            e.sent_at,
+            e.priority,
         )
         for e in history
     ]
+    synced_file = DATA / "synced_examples.json"
+    if synced_file.exists():  # written by scripts/sync_examples.py --out
+        for r in json.loads(synced_file.read_text(encoding="utf-8")):
+            pool.append(
+                Example(
+                    "smartlead_sync",
+                    r["source_thread_id"],
+                    r["campaign_name"],
+                    r["label"],
+                    r["prospect_reply"],
+                    r["gamic_reply"],
+                    parse_time(r["replied_at"]),
+                    parse_time(r["sent_at"]),
+                )
+            )
+    print(f"Library for the test: {len(pool)} examples ({len(history)} history)")
+    all_pool = pool
+    hidden: set[str] = set()  # examples hidden for the current row (its own answer, copies of it)
     drafter = ExampleDrafter(
-        lambda label: pool, client, settings.DRAFT_MODEL, settings.PRICE_SENTENCE
+        lambda label: [e for e in all_pool if e.source_thread_id not in hidden],
+        client,
+        settings.DRAFT_MODEL,
+        settings.PRICE_SENTENCE,
     )
 
     data = {r["thread_id"]: r for r in read_csv(DATA / "gmc_all_replies_dataset.csv")}
@@ -185,6 +214,12 @@ def main() -> None:
         prospect = clean_reply(row["prospect_first_reply"])
         real = clean_body(row["gamic_response_to_first_reply"]).strip()
         first = row["lead_name"].strip().split(" ")[0]
+        hidden.clear()
+        hidden.update(
+            e.source_thread_id
+            for e in all_pool
+            if e.source_thread_id == thread_id or similarity(e.gamic_reply, real) >= 90
+        )
         outcome = drafter.draft(
             thread={
                 "campaign_name": row["campaign_name"],
@@ -201,7 +236,11 @@ def main() -> None:
             failed.append(f"{thread_id} ({outcome.reason})")
             continue
         closest = select_examples(
-            pool, row["gold"], row["campaign_name"], k=1, exclude_thread_id=thread_id
+            [e for e in all_pool if e.source_thread_id not in hidden],
+            row["gold"],
+            row["campaign_name"],
+            k=1,
+            reply=prospect,
         )
         results.append(
             {
@@ -211,6 +250,10 @@ def main() -> None:
                 "lead_name": row["lead_name"],
                 "prospect": prospect,
                 "draft": outcome.text,
+                "draft_words": word_count(outcome.text),
+                "real_words": word_count(real),
+                "word_limit": outcome.word_limit,
+                "length_fix": outcome.length_fix,
                 "real": real,
                 "score": similarity(outcome.text, real),
                 "baseline": similarity(closest[0].gamic_reply, real) if closest else 0.0,

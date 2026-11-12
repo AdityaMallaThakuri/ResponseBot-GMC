@@ -198,8 +198,8 @@ class SmartleadClient:
         )
 
     def get_sequence(self, campaign_id: int) -> Any:
-        """The campaign's sequence steps (read only). The route is UNVERIFIED against live data."""
-        return self._request("GET", f"/campaigns/{campaign_id}/sequence")
+        """The campaign's sequence steps (read only). Plural route, verified live; singular is 404."""
+        return self._request("GET", f"/campaigns/{campaign_id}/sequences")
 
     def list_campaigns(self) -> list[dict[str, Any]]:
         """All campaigns on the account (read only). Route per Smartlead's API reference."""

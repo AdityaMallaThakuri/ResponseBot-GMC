@@ -124,6 +124,9 @@ def _prepare_from_examples(
                 "flagged": list(outcome.flagged),
                 "removed_sentences": outcome.removed,
                 "price_confirmed": outcome.price_confirmed,
+                "word_count": outcome.word_count,
+                "word_limit": outcome.word_limit,
+                "length_fix": outcome.length_fix,
             },
         ),
     )

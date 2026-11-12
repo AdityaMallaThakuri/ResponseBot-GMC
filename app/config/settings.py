@@ -91,6 +91,8 @@ class Settings(BaseSettings):
     # The learning loop reads threads from Smartlead (read only) this often, in minutes, and saves
     # the replies Ray sent as new examples. 0 turns the loop off.
     LEARN_INTERVAL_MINUTES: int = 30
+    # The Smartlead example sync (read only) runs this often, in minutes. 0 turns it off.
+    SYNC_INTERVAL_MINUTES: int = 1440
     # The price sentence for price_question and price_and_info drafts, inserted word for word.
     # Empty: the most recent price sentence in the example library is used and the card says
     # "Price not confirmed: check with Aryan".
@@ -102,11 +104,11 @@ class Settings(BaseSettings):
     SLACK_SHADOW_CHANNEL: str | None = None
     SLACK_OPS_CHANNEL: str | None = None
 
-    @field_validator("LEARN_INTERVAL_MINUTES", mode="before")
+    @field_validator("LEARN_INTERVAL_MINUTES", "SYNC_INTERVAL_MINUTES", mode="before")
     @classmethod
-    def _blank_interval_is_default(cls, value: object) -> object:
+    def _blank_interval_is_default(cls, value: object, info: ValidationInfo) -> object:
         if isinstance(value, str) and not value.strip():
-            return cls.model_fields["LEARN_INTERVAL_MINUTES"].default
+            return cls.model_fields[info.field_name].default
         return value
 
     @field_validator("CLASSIFIER_MODEL", "DRAFT_LABEL_MODEL", "DRAFT_MODEL", mode="before")
