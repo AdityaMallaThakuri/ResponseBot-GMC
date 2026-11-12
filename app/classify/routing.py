@@ -6,7 +6,8 @@ Lanes shown on the Slack card:
   called.
 - human_only: a notice for a person, no draft. Low confidence, a classifier error,
   not_interested (with "suggest: close" at or above its own threshold), out_of_office,
-  wrong_person, auto_reply_or_bounce and off_script.
+  wrong_person, auto_reply_or_bounce, off_script, objection_info and objection_price (Ray
+  writes those himself).
 - draft: every other label. The card shows a draft written from past examples in a copy-friendly
   block, with Good draft / Bad draft buttons that only record feedback. A person copies the draft
   and sends it from Smartlead: the bot sends nothing.
@@ -26,14 +27,26 @@ LANE_WOULD_SUPPRESS = "would_suppress"
 
 # Labels that never get a draft, even when the model is confident.
 NOTICE_ONLY_LABELS = frozenset(
-    {"out_of_office", "wrong_person", "auto_reply_or_bounce", "off_script"}
+    {
+        "out_of_office",
+        "wrong_person",
+        "auto_reply_or_bounce",
+        "off_script",
+        "objection_info",
+        "objection_price",
+    }
 )
 
 
-# A short note on the card for replies that need no answer at all.
+# Objections are never drafted: the lead's reply is on the card and Ray writes the answer.
+OBJECTION_NOTE = "Objection: Ray to write this one"
+
+# A short note on the card for replies that need no answer at all, or that a person answers.
 NOTICE_NOTES = {
     "out_of_office": "Out of office: no reply needed.",
     "auto_reply_or_bounce": "Automatic reply or bounce: no reply needed.",
+    "objection_info": OBJECTION_NOTE,
+    "objection_price": OBJECTION_NOTE,
 }
 
 # Labels a reply may be drafted for (the draft lane). Every other label goes to a person.

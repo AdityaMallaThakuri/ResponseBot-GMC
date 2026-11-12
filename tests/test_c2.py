@@ -110,11 +110,10 @@ def test_other_labels_go_to_the_draft_lane(label: str) -> None:
     assert (plan.lane, plan.would_suppress, plan.note) == (LANE_DRAFT, False, None)
 
 
-def test_the_draft_lane_covers_exactly_the_labels_with_a_playbook_reply() -> None:
+def test_the_draft_lane_covers_exactly_the_labels_that_are_drafted() -> None:
     assert set(DRAFT_LABELS) == {
         "meeting_request", "info_request", "free_list_request", "price_question",
         "price_and_info", "lead_magnet_request", "trial_request", "booked_confirmation",
-        "objection_info", "objection_price",
     }  # fmt: skip
 
 
@@ -128,6 +127,13 @@ def test_out_of_office_and_auto_replies_get_a_short_note() -> None:
     assert "no reply needed" in route(llm("out_of_office", 0.95), 0.75, 0.90).note
     assert "no reply needed" in route(llm("auto_reply_or_bounce", 0.95), 0.75, 0.90).note
     assert route(llm("wrong_person", 0.95), 0.75, 0.90).note is None
+
+
+@pytest.mark.parametrize("label", ["objection_info", "objection_price"])
+def test_objections_get_no_draft_and_a_note_for_ray(label: str) -> None:
+    plan = route(llm(label, 0.95), 0.75, 0.90)
+    assert plan.lane == LANE_HUMAN_ONLY
+    assert plan.note == "Objection: Ray to write this one"
 
 
 def test_do_not_contact_would_suppress_when_confident_enough() -> None:
