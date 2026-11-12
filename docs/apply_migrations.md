@@ -1,7 +1,7 @@
 # Applying the database migrations
 
 The migrations in `db/migrations/` are plain Postgres (15+) and work on Supabase. Nothing applies
-them automatically: you run them by hand, in numeric order. They create 13 tables, so apply them
+them automatically: you run them by hand, in numeric order. They create 14 tables, so apply them
 to a scratch project first and check them before your real one.
 
 | File | Creates |
@@ -32,7 +32,7 @@ creates a table must also enable row level security and revoke `anon` / `authent
    ```
    .venv/Scripts/python scripts/check_schema.py
    ```
-   Expect `OK: 13 tables, every migration parses, RLS on, tables match CLAUDE.md`.
+   Expect `OK: 14 tables, every migration parses, RLS on, tables match CLAUDE.md`.
 2. Use a scratch Supabase project (or a Supabase branch) for the first run.
 3. Do not put the database password in `.env` or commit it. If you use `psql` (option B), keep the
    connection string in your shell only.

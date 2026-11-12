@@ -201,6 +201,37 @@ class SmartleadClient:
         """The campaign's sequence steps (read only). The route is UNVERIFIED against live data."""
         return self._request("GET", f"/campaigns/{campaign_id}/sequence")
 
+    def list_campaigns(self) -> list[dict[str, Any]]:
+        """All campaigns on the account (read only). Route per Smartlead's API reference."""
+        result = self._request("GET", "/campaigns/")
+        if not isinstance(result, list):
+            raise SmartleadError("unexpected campaigns response shape")
+        return result
+
+    def list_campaign_webhooks(self, campaign_id: int) -> list[dict[str, Any]]:
+        """The webhooks attached to one campaign (read only). Route UNVERIFIED on live data."""
+        result = self._request("GET", f"/campaigns/{campaign_id}/webhooks")
+        if isinstance(result, dict):
+            result = result.get("data", result.get("webhooks", []))
+        if not isinstance(result, list):
+            raise SmartleadError("unexpected webhooks response shape")
+        return result
+
+    def create_campaign_webhook(self, campaign_id: int, name: str, webhook_url: str) -> Any:
+        """Attach one EMAIL_REPLY webhook to one campaign. Never updates or deletes anything."""
+        return self._request(
+            "POST",
+            "/webhook/create",
+            json={
+                "name": name,
+                "webhook_url": webhook_url,
+                "email_campaign_id": campaign_id,
+                "association_type": "campaign",
+                "event_type_map": {"EMAIL_REPLY": True},
+                "force_create": False,
+            },
+        )
+
     def get_lead_categories(self) -> Any:
         return self._request("GET", "/leads/fetch-categories")
 

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
@@ -34,6 +35,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     install_redaction()  # keep ?secret=... out of uvicorn's access log
     if not settings.gmc_campaign_ids:
         log.warning("GMC_CAMPAIGN_IDS is empty: every Smartlead webhook will be ignored")
+    send_flag = settings.SEND_ENABLED or settings.LIVE_SEND_ALL
+    if os.environ.get("RAILWAY_ENVIRONMENT") and send_flag:
+        # Shadow mode: a deployed copy refuses to start if a send flag is on.
+        raise RuntimeError("SEND_ENABLED and LIVE_SEND_ALL must be false in production")
     if settings.SEND_ENABLED:
         log.warning(
             "SEND_ENABLED is on, but the bot no longer sends: a person sends from Smartlead"
