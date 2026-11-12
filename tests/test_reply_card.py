@@ -23,7 +23,6 @@ def card(**over: Any) -> ReplyCard:
         "label": "info_request",
         "confidence": 0.824,
         "reason": "Asks how it works.",
-        "buttons": True,
     }
     return ReplyCard(**{**base, **over})
 
@@ -67,28 +66,47 @@ def test_slack_control_characters_in_the_reply_are_escaped() -> None:
 
 
 def test_lane_wording() -> None:
-    assert "human only" in text_of(build_reply_card_blocks(card(lane="human_only", buttons=False)))
-    suppress = text_of(build_reply_card_blocks(card(lane="would_suppress", buttons=False)))
-    assert "would_suppress" in suppress and "nothing was sent" in suppress
-    assert "draft (no draft yet" in text_of(build_reply_card_blocks(card()))
+    assert "human only" in text_of(build_reply_card_blocks(card(lane="human_only")))
+    suppress = text_of(build_reply_card_blocks(card(lane="would_suppress")))
+    assert "DO NOT REPLY" in suppress and "nothing was sent" in suppress
+    shown = text_of(build_reply_card_blocks(card(draft_text="Hello")))
+    assert "copy it and send it yourself" in shown
 
 
-def test_buttons_only_when_asked_and_all_carry_the_thread_ref() -> None:
-    with_buttons = build_reply_card_blocks(card())
-    actions = [b for b in with_buttons if b["type"] == "actions"]
+def test_the_draft_is_a_copy_friendly_code_block() -> None:
+    fence = "`" * 3
+    blocks = build_reply_card_blocks(
+        card(draft_text=f"Hi Jane,\n\nSounds good <3 & more\n{fence}x{fence}")
+    )
+    shown = next(b for b in blocks if b["type"] == "section" and "Draft reply" in b["text"]["text"])
+    body = shown["text"]["text"].split("(copy it)\n", 1)[1]
+    assert body.startswith(fence) and body.endswith(fence)
+    assert "&lt;3 &amp; more" in body and "'''x'''" in body  # escaped, no nested fence
+    assert body.count(fence) == 2
+
+
+def test_figures_in_the_draft_are_highlighted() -> None:
+    flagged = card(draft_text="We charge $2M", draft_flags=("$2M", "15%"))
+    text = text_of(build_reply_card_blocks(flagged))
+    assert "Check these figures before you send" in text and "`$2M`" in text and "`15%`" in text
+    assert "Check these figures" not in text_of(build_reply_card_blocks(card(draft_text="Hi")))
+
+
+def test_only_a_draft_card_has_the_two_feedback_buttons_and_no_approve_or_skip() -> None:
+    blocks = build_reply_card_blocks(card(draft_text="Hello"))
+    actions = [b for b in blocks if b["type"] == "actions"]
     assert len(actions) == 1
-    assert [e["action_id"] for e in actions[0]["elements"]] == [
-        "reply_approve",
-        "reply_edit",
-        "reply_skip",
-    ]
+    assert [e["action_id"] for e in actions[0]["elements"]] == ["draft_good", "draft_bad"]
+    assert [e["text"]["text"] for e in actions[0]["elements"]] == ["Good draft", "Bad draft"]
     assert {e["value"] for e in actions[0]["elements"]} == {"thread-1"}
-    without = build_reply_card_blocks(card(buttons=False))
-    assert all(b["type"] != "actions" for b in without)
+    assert "reply_approve" not in text_of(blocks) and "reply_skip" not in text_of(blocks)
+    for lane in ("human_only", "would_suppress"):
+        assert all(b["type"] != "actions" for b in build_reply_card_blocks(card(lane=lane)))
+    assert all(b["type"] != "actions" for b in build_reply_card_blocks(card()))  # no draft
 
 
 def test_a_note_is_shown() -> None:
-    blocks = build_reply_card_blocks(card(lane="human_only", buttons=False, note="suggest: close"))
+    blocks = build_reply_card_blocks(card(lane="human_only", note="suggest: close"))
     assert "*suggest: close*" in text_of(blocks)
     assert "suggest" not in text_of(build_reply_card_blocks(card()))
 
@@ -101,7 +119,6 @@ def test_a_classifier_failure_shows_no_label() -> None:
                 confidence=None,
                 reason="classifier error",
                 lane="human_only",
-                buttons=False,
             )
         )
     )

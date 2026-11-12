@@ -95,27 +95,23 @@ def test_a_draft_is_stored_with_template_slots_validator_result_and_model() -> N
     assert draft["classification_id"] == rows(deps.db, "classifications")[0]["id"]
 
 
-def test_the_card_shows_the_draft_and_the_three_buttons() -> None:
+def test_the_card_shows_the_draft_and_the_feedback_buttons() -> None:
     deps = make_deps("info_request")
     run(deps)
     (post,) = deps.slack.posts
     text = text_of(post)
-    assert (
-        "Draft reply" in text
-        and "template T2" in text
-        and "Thanks for asking about send times." in text
-    )
-    assert buttons(post) == ["reply_approve", "reply_edit", "reply_skip"]
+    assert "Draft reply" in text and "Thanks for asking about send times." in text
+    assert buttons(post) == ["draft_good", "draft_bad"]
     card = rows(deps.db, "slack_cards")[0]
     assert card["lane"] == "draft" and card["draft_id"] == rows(deps.db, "drafts")[0]["id"]
     assert post["channel"] == "drafts" and "Thanks for asking" not in post["text"]
 
 
-def test_a_draft_with_a_placeholder_has_no_approve_button() -> None:
+def test_a_draft_with_a_placeholder_still_gets_the_feedback_buttons() -> None:
     deps = make_deps("meeting_request")
     run(deps)
     (post,) = deps.slack.posts
-    assert buttons(post) == ["reply_edit", "reply_skip"]
+    assert buttons(post) == ["draft_good", "draft_bad"]
     assert "Approve is blocked until [TIME OPTIONS] is filled in" in text_of(post)
     assert "[TIME OPTIONS]" in text_of(post)
     assert rows(deps.db, "drafts")[0]["validator_result"]["approve_blockers"] == [
@@ -197,7 +193,7 @@ def test_with_no_drafter_the_card_is_the_c2_card() -> None:
     deps.drafter = None
     run(deps)
     assert not rows(deps.db, "drafts") and "Draft reply" not in text_of(deps.slack.posts[0])
-    assert buttons(deps.slack.posts[0]) == ["reply_approve", "reply_edit", "reply_skip"]
+    assert buttons(deps.slack.posts[0]) == []  # no draft, so no buttons at all
 
 
 # ------------------------------------------------------------------ Approve, Skip, Edit
@@ -331,12 +327,7 @@ def test_an_edit_is_stored_revalidated_and_only_warned() -> None:
         draft["validator_ok"] is True and draft["validator_result"]["warnings"] == result.warnings
     )
     card_text = json.dumps(result.blocks)
-    assert (
-        "Totally new" in card_text
-        and "edited" in card_text
-        and "Warning: the number 17" in card_text
-    )
-    assert any(b["type"] == "actions" for b in result.blocks)  # Approve is still possible
+    assert "Totally new" in card_text and "Warning: the number 17" in card_text
 
 
 def test_approving_an_edited_draft_records_edited_with_the_distance() -> None:
@@ -349,9 +340,6 @@ def test_approving_an_edited_draft_records_edited_with_the_distance() -> None:
     )
     result = service.submit_edit(channel, ts, filled)
     assert result.warnings == []
-    assert any(
-        b.get("type") == "actions" and "reply_approve" in json.dumps(b) for b in result.blocks
-    )
     assert service.click(channel, ts, "reply_approve", USER).kind == "recorded"
     (decision,) = rows(deps.db, "decisions")
     assert decision["decision"] == "edited" and decision["final_text"] == filled
@@ -529,33 +517,25 @@ def card(**over: Any) -> ReplyCard:
         "label": "info_request",
         "confidence": 0.9,
         "reason": "Asks for more.",
-        "buttons": True,
         "draft_text": "Line one\nLine two <b>&</b>",
-        "template_id": "T2",
     }
     return ReplyCard(**{**base, **over})
 
 
-def test_the_draft_is_quoted_escaped_and_labelled() -> None:
+def test_the_draft_is_escaped_and_labelled() -> None:
     text = json.dumps(build_reply_card_blocks(card()))
-    assert "Draft reply" in text and "template T2" in text
-    assert "&gt;Line one" not in text and "\\n>Line two &lt;b&gt;&amp;&lt;/b&gt;" in text
+    assert "Draft reply" in text and "Line two &lt;b&gt;&amp;&lt;/b&gt;" in text
     assert "<b>" not in text
 
 
-def test_an_edited_draft_says_so_and_a_very_long_one_is_cut() -> None:
-    assert "edited" in json.dumps(build_reply_card_blocks(card(draft_edited=True)))
+def test_a_very_long_draft_is_cut() -> None:
     blocks = build_reply_card_blocks(card(draft_text="x" * 5000))
     assert all(len(b["text"]["text"]) <= 3000 for b in blocks if b["type"] == "section")
 
 
-def test_the_approve_button_can_be_left_out() -> None:
-    blocks = build_reply_card_blocks(
-        card(approve_allowed=False, draft_notes=("Approve is blocked.",))
-    )
-    actions = next(b for b in blocks if b["type"] == "actions")
-    assert [e["action_id"] for e in actions["elements"]] == ["reply_edit", "reply_skip"]
-    assert "Approve is blocked." in json.dumps(blocks)
+def test_card_notes_are_shown() -> None:
+    blocks = build_reply_card_blocks(card(draft_notes=("Fill in [LINK] before you send.",)))
+    assert "Fill in [LINK] before you send." in json.dumps(blocks)
 
 
 def test_the_helpers_import() -> None:

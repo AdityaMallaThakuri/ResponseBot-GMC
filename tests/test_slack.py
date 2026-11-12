@@ -228,14 +228,27 @@ def post_click(
     return client.post("/slack/events", content=body, headers=headers)
 
 
-def test_valid_signature_reaches_the_handler(slack_api: AsyncMock) -> None:
+def test_valid_signature_reaches_the_feedback_handler(slack_api: AsyncMock) -> None:
+    db = app.state.ingest.db
+    db.tables["drafts"] = [{"id": "d1", "text": "x"}]
+    db.tables["slack_cards"] = [
+        {"id": "c1", "channel": "C012345", "slack_ts": TS, "draft_id": "d1", "status": "posted"}
+    ]
     with TestClient(app) as client:
-        response = post_click(client, click_payload(APPROVE))
+        response = post_click(client, click_payload("draft_good"))
     assert response.status_code == 200
     slack_api.assert_awaited_once()
     kwargs = slack_api.await_args.kwargs
     assert (kwargs["channel"], kwargs["ts"]) == ("C012345", TS)
-    assert "<@U012ABCDEF> approved" in kwargs["blocks"][-1]["elements"][0]["text"]
+    assert "<@U012ABCDEF> marked this a good draft" in kwargs["blocks"][-1]["elements"][0]["text"]
+    assert db.tables["drafts"][0]["feedback"] == "good"
+
+
+def test_the_approve_button_is_no_longer_handled(slack_api: AsyncMock) -> None:
+    with TestClient(app) as client:
+        response = post_click(client, click_payload(APPROVE))
+    assert response.status_code == 404
+    slack_api.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

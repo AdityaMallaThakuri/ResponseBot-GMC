@@ -135,12 +135,9 @@ def _card(
         confidence=result.confidence if result else None,
         reason=result.reason if result else plan.reason,
         note=plan.note,
-        buttons=plan.buttons,
         draft_text=view.text if view else None,
-        template_id=view.template_id if view else None,
-        draft_edited=view.edited if view else False,
+        draft_flags=view.flags if view else (),
         draft_notes=view.notes if view else (),
-        approve_allowed=view.approve_allowed if view else True,
     )
 
 

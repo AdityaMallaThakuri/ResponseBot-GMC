@@ -7,8 +7,9 @@ Lanes shown on the Slack card:
 - human_only: a notice for a person, no draft. Low confidence, a classifier error,
   not_interested (with "suggest: close" at or above its own threshold), out_of_office,
   wrong_person, auto_reply_or_bounce and off_script.
-- draft: every other label. Drafting comes in C3, so for now this is a card for a person with
-  the Approve / Edit / Skip buttons, which record a decision and do nothing else.
+- draft: every other label. The card shows a draft written from past examples in a copy-friendly
+  block, with Good draft / Bad draft buttons that only record feedback. A person copies the draft
+  and sends it from Smartlead: the bot sends nothing.
 """
 
 from __future__ import annotations
@@ -28,6 +29,12 @@ NOTICE_ONLY_LABELS = frozenset(
     {"out_of_office", "wrong_person", "auto_reply_or_bounce", "off_script"}
 )
 
+
+# A short note on the card for replies that need no answer at all.
+NOTICE_NOTES = {
+    "out_of_office": "Out of office: no reply needed.",
+    "auto_reply_or_bounce": "Automatic reply or bounce: no reply needed.",
+}
 
 # Labels a reply may be drafted for (the draft lane). Every other label goes to a person.
 DRAFT_LABELS = frozenset(
@@ -51,7 +58,6 @@ class Route:
     lane: str
     reason: str  # why, in a few words, for the card
     note: str | None = None  # for example "suggest: close"
-    buttons: bool = False  # Approve / Edit / Skip only on the draft lane
     would_suppress: bool = False  # record a would_suppress action
 
 
@@ -71,5 +77,9 @@ def route(
     if decision.lane == HUMAN_ONLY:
         return Route(LANE_HUMAN_ONLY, decision.reason, note=decision.note)
     if classification.label in NOTICE_ONLY_LABELS:
-        return Route(LANE_HUMAN_ONLY, f"{classification.label}: no draft")
-    return Route(LANE_DRAFT, "drafting is not built yet", buttons=True)
+        return Route(
+            LANE_HUMAN_ONLY,
+            f"{classification.label}: no draft",
+            note=NOTICE_NOTES.get(classification.label),
+        )
+    return Route(LANE_DRAFT, "draft from examples")

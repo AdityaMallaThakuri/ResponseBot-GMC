@@ -15,6 +15,7 @@ from app.db.records import (
     NewDecision,
     NewDraft,
     NewEvalResult,
+    NewExample,
     NewGoldLabel,
     NewMessage,
     NewQualification,
@@ -35,6 +36,7 @@ THREAD_KEY = ("email_lead_id", "email_campaign_id")
 MESSAGE_KEY = ("thread_id", "direction", "sent_at", "message_id")
 DECISION_KEY = ("draft_id",)
 GOLD_LABEL_KEY = ("thread_id", "labeler")
+EXAMPLE_KEY = ("source", "source_thread_id")
 
 
 class DatabaseError(RuntimeError):
@@ -382,3 +384,38 @@ def claim_draft(db: Database, draft_id: str, from_status: str, to_status: str) -
         .data
     )
     return bool(data)
+
+
+# -- reply examples and draft feedback (the example library) -------------------------------------
+
+
+def insert_example(db: Database, example: NewExample) -> InsertResult:
+    """Insert once per (source, source_thread_id); a repeat returns the stored row."""
+    return _insert_once(db, "reply_examples", to_row(example), EXAMPLE_KEY)
+
+
+def fetch_examples_for_label(db: Database, label: str, limit: int = 100) -> list[Row]:
+    """The newest examples with this label."""
+    return _select(
+        db, "reply_examples", {"label": label}, order="replied_at", desc=True, limit=limit
+    )
+
+
+def fetch_recent_examples(db: Database, limit: int = 300) -> list[Row]:
+    return _select(db, "reply_examples", {}, order="replied_at", desc=True, limit=limit)
+
+
+def find_example_for_draft(db: Database, draft_id: str) -> Row | None:
+    return _first(db, "reply_examples", {"draft_id": draft_id})
+
+
+def fetch_proposed_drafts(db: Database, limit: int = 200) -> list[Row]:
+    """Drafts still waiting for Ray's reply, newest first."""
+    return _select(
+        db,
+        "drafts",
+        {"status": DraftStatus.PROPOSED.value},
+        order="created_at",
+        desc=True,
+        limit=limit,
+    )

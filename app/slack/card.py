@@ -11,6 +11,10 @@ APPROVE = "reply_approve"
 EDIT = "reply_edit"
 SKIP = "reply_skip"
 ACTIONS_BLOCK_ID = "reply_card_actions"
+GOOD_DRAFT = "draft_good"
+BAD_DRAFT = "draft_bad"
+FEEDBACK_BLOCK_ID = "draft_feedback"
+FEEDBACK_TEXT = {GOOD_DRAFT: "marked this a good draft", BAD_DRAFT: "marked this a bad draft"}
 
 # action id -> (button label, what the updated message says happened)
 CHOICES: dict[str, tuple[str, str]] = {
@@ -111,9 +115,9 @@ def post_test_card(
 
 REPLY_LIMIT = 600
 LANE_TEXT = {
-    "draft": "draft (no draft yet: drafting is built in a later step)",
+    "draft": "draft",
     "human_only": "human only",
-    "would_suppress": "would_suppress (recorded only, nothing was sent)",
+    "would_suppress": "DO NOT REPLY (unsubscribe request; nothing was sent or changed)",
 }
 
 
@@ -129,22 +133,53 @@ class ReplyCard:
     reason: str
     company: str | None = None
     note: str | None = None  # for example "suggest: close"
-    buttons: bool = False
-    # C3: the draft reply, if one was made
+    # The draft reply, if one was made. A person copies it and sends it from Smartlead.
     draft_text: str | None = None
-    template_id: str | None = None
-    draft_edited: bool = False
-    draft_notes: tuple[str, ...] = ()  # warnings and why Approve is blocked, in plain words
-    approve_allowed: bool = True
+    draft_flags: tuple[str, ...] = ()  # numbers, prices and percentages in the draft
+    draft_notes: tuple[str, ...] = ()
 
 
 DRAFT_LIMIT = 2800  # a Slack section holds 3000 characters
+FENCE = "`" * 3
 
 
 def lane_text(card: ReplyCard) -> str:
     if card.lane == "draft" and card.draft_text is not None:
-        return "draft (for a person to approve; nothing is sent yet)"
+        return "draft (copy it and send it yourself; the bot sends nothing)"
     return LANE_TEXT.get(card.lane, card.lane)
+
+
+def code_block(text: str, limit: int = DRAFT_LIMIT) -> str:
+    """The text in a code block, so Slack's copy button copies it exactly."""
+    body = escape_mrkdwn(text.replace(FENCE, "'''"))
+    if len(body) > limit:
+        body = body[: limit - 1] + "…"
+    return f"{FENCE}{body}{FENCE}"
+
+
+def feedback_actions(thread_ref: str) -> Block:
+    def button(action_id: str, label: str) -> Block:
+        return {
+            "type": "button",
+            "action_id": action_id,
+            "text": {"type": "plain_text", "text": label},
+            "value": thread_ref,
+        }
+
+    return {
+        "type": "actions",
+        "block_id": FEEDBACK_BLOCK_ID,
+        "elements": [button(GOOD_DRAFT, "Good draft"), button(BAD_DRAFT, "Bad draft")],
+    }
+
+
+def feedback_resolved_blocks(original: list[Block], user_id: str, action_id: str) -> list[Block]:
+    """The card after a feedback click: the two buttons replaced by who said what."""
+    if action_id not in FEEDBACK_TEXT:
+        raise ValueError(f"unknown feedback action: {action_id!r}")
+    kept = [b for b in original if b.get("block_id") != FEEDBACK_BLOCK_ID]
+    note = f"<@{user_id}> {FEEDBACK_TEXT[action_id]}"
+    return [*kept, {"type": "context", "elements": [{"type": "mrkdwn", "text": note}]}]
 
 
 def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
@@ -184,13 +219,12 @@ def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
         },
     ]
     if card.draft_text is not None:
-        title = f"*Draft reply* (template {escape_mrkdwn(card.template_id or '?')}"
-        title += ", edited)" if card.draft_edited else ")"
-        body = escape_mrkdwn(card.draft_text)
-        if len(body) > DRAFT_LIMIT:
-            body = body[: DRAFT_LIMIT - 1] + "…"
-        quoted = "\n".join(f">{line}" for line in body.split("\n"))
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"{title}\n{quoted}"}})
+        text = f"*Draft reply* (copy it)\n{code_block(card.draft_text)}"
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": text}})
+    if card.draft_flags:
+        figures = ", ".join(f"`{escape_mrkdwn(f)}`" for f in card.draft_flags)
+        warning = f":warning: *Check these figures before you send:* {figures}"
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": warning}})
     for line in card.draft_notes:
         blocks.append(
             {"type": "context", "elements": [{"type": "mrkdwn", "text": escape_mrkdwn(line)}]}
@@ -202,22 +236,8 @@ def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
                 "elements": [{"type": "mrkdwn", "text": f"*{escape_mrkdwn(card.note)}*"}],
             }
         )
-    if card.buttons:
-        blocks.append(
-            {
-                "type": "actions",
-                "block_id": ACTIONS_BLOCK_ID,
-                "elements": [
-                    *(
-                        [_button(APPROVE, card.thread_ref, "primary")]
-                        if card.approve_allowed
-                        else []
-                    ),
-                    _button(EDIT, card.thread_ref),
-                    _button(SKIP, card.thread_ref),
-                ],
-            }
-        )
+    if card.draft_text is not None:
+        blocks.append(feedback_actions(card.thread_ref))
     return blocks
 
 

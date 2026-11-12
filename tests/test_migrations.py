@@ -109,7 +109,7 @@ def test_0008_locks_down_both_new_tables_and_enables_rls() -> None:
 def test_templates_and_events_tables_were_not_added() -> None:
     errors, count = load_checker().check(ROOT)
     created = set(re.findall(r"create table if not exists (\w+)", sql()))
-    assert not created & {"templates", "events"} and len(created) == count == 13
+    assert not created & {"templates", "events"} and len(created) == count == 14
 
 
 def test_label_check_matches_claude_md_label_set() -> None:
@@ -166,7 +166,7 @@ def test_no_secrets_columns() -> None:
 
 def test_repo_migrations_pass_the_checker() -> None:
     errors, count = load_checker().check(ROOT)
-    assert errors == [] and count == 13
+    assert errors == [] and count == 14
 
 
 # -- the checker itself ------------------------------------------------------------

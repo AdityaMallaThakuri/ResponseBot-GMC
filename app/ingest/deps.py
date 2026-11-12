@@ -50,7 +50,9 @@ class IngestDeps:
     classifier: Any | None = None  # app.classify.classifier.Classifier or a fake
     slack: Any | None = None  # slack_sdk.WebClient or a fake with chat_postMessage
     # C3. Without a drafter the draft lane shows a card with no draft (C2 behaviour).
-    drafter: Any | None = None  # app.templates.engine.Drafter or a fake
+    drafter: Any | None = None  # app.templates.engine.Drafter or a fake (templates: unused now)
+    # Drafting from examples: app.examples.drafter.ExampleDrafter or a fake. Wins over `drafter`.
+    example_drafter: Any | None = None
     config: IngestConfig = field(default_factory=IngestConfig)
 
 
@@ -61,18 +63,19 @@ def build_deps(settings: Settings) -> IngestDeps:
 
     from app.classify.classifier import Classifier
     from app.db.connect import create_db
+    from app.examples.drafter import ExampleDrafter
+    from app.examples.library import load_pool
     from app.smartlead.client import SmartleadClient
-    from app.templates.engine import Drafter
-    from app.templates.facts import load_facts
-    from app.templates.playbook import load_playbook
 
     claude = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, max_retries=5)
-    facts = load_facts()
+    db = create_db(settings)
     return IngestDeps(
-        db=create_db(settings),
+        db=db,
         smartlead=SmartleadClient.from_settings(settings),
         classifier=Classifier(claude, settings.CLASSIFIER_MODEL),
         slack=WebClient(token=settings.SLACK_BOT_TOKEN),
-        drafter=Drafter(load_playbook(facts=facts), facts, claude, settings.DRAFT_MODEL),
+        example_drafter=ExampleDrafter(
+            lambda label: load_pool(db, label), claude, settings.DRAFT_MODEL
+        ),
         config=IngestConfig.from_settings(settings),
     )

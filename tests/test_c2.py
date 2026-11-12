@@ -105,14 +105,9 @@ def all_text(blocks: list[dict[str, Any]]) -> str:
 
 
 @pytest.mark.parametrize("label", DRAFT_LABELS)
-def test_other_labels_get_a_card_with_buttons(label: str) -> None:
+def test_other_labels_go_to_the_draft_lane(label: str) -> None:
     plan = route(llm(label, 0.8), 0.75, 0.90)
-    assert (plan.lane, plan.buttons, plan.would_suppress, plan.note) == (
-        LANE_DRAFT,
-        True,
-        False,
-        None,
-    )
+    assert (plan.lane, plan.would_suppress, plan.note) == (LANE_DRAFT, False, None)
 
 
 def test_the_draft_lane_covers_exactly_the_labels_with_a_playbook_reply() -> None:
@@ -124,15 +119,21 @@ def test_the_draft_lane_covers_exactly_the_labels_with_a_playbook_reply() -> Non
 
 
 @pytest.mark.parametrize("label", sorted(NOTICE_ONLY_LABELS))
-def test_notice_only_labels_never_get_buttons_or_a_draft(label: str) -> None:
+def test_notice_only_labels_never_get_a_draft(label: str) -> None:
     plan = route(llm(label, 0.99), 0.75, 0.90)
-    assert (plan.lane, plan.buttons, plan.would_suppress) == (LANE_HUMAN_ONLY, False, False)
+    assert (plan.lane, plan.would_suppress) == (LANE_HUMAN_ONLY, False)
+
+
+def test_out_of_office_and_auto_replies_get_a_short_note() -> None:
+    assert "no reply needed" in route(llm("out_of_office", 0.95), 0.75, 0.90).note
+    assert "no reply needed" in route(llm("auto_reply_or_bounce", 0.95), 0.75, 0.90).note
+    assert route(llm("wrong_person", 0.95), 0.75, 0.90).note is None
 
 
 def test_do_not_contact_would_suppress_when_confident_enough() -> None:
     for confidence in (0.75, 0.9, 1.0):
         plan = route(llm("do_not_contact", confidence), 0.75, 0.90)
-        assert (plan.lane, plan.would_suppress, plan.buttons) == (LANE_WOULD_SUPPRESS, True, False)
+        assert (plan.lane, plan.would_suppress) == (LANE_WOULD_SUPPRESS, True)
     low = route(llm("do_not_contact", 0.7), 0.75, 0.90)
     assert (low.lane, low.would_suppress) == (LANE_HUMAN_ONLY, False)
 
@@ -147,12 +148,12 @@ def test_not_interested_is_human_only_with_a_close_suggestion_from_0_90() -> Non
 
 def test_below_the_confidence_threshold_is_human_only_with_no_draft() -> None:
     plan = route(llm("info_request", 0.74), 0.75, 0.90)
-    assert (plan.lane, plan.buttons) == (LANE_HUMAN_ONLY, False)
+    assert plan.lane == LANE_HUMAN_ONLY
 
 
 def test_a_classifier_error_is_human_only() -> None:
     plan = route(None, 0.75, 0.90)
-    assert (plan.lane, plan.buttons, plan.reason) == (LANE_HUMAN_ONLY, False, "classifier error")
+    assert (plan.lane, plan.reason) == (LANE_HUMAN_ONLY, "classifier error")
 
 
 def test_only_do_not_contact_ever_records_a_would_suppress() -> None:
@@ -215,7 +216,7 @@ def test_do_not_contact_records_would_suppress_and_posts_a_notice_but_calls_noth
     )
     (post_,) = slack.posts
     text = all_text(post_["blocks"])
-    assert "would_suppress" in text and "actions" not in [b["type"] for b in post_["blocks"]]
+    assert "DO NOT REPLY" in text and "actions" not in [b["type"] for b in post_["blocks"]]
     assert rows(db, "slack_cards")[0]["lane"] == "auto_action"
     assert len(smartlead.thread_calls) == 1  # only C1's read of the thread
 
@@ -258,16 +259,12 @@ def test_low_confidence_goes_to_a_human_with_no_buttons() -> None:
     assert "human only" in all_text(blocks) and "actions" not in [b["type"] for b in blocks]
 
 
-def test_other_labels_get_a_card_with_the_three_buttons() -> None:
+def test_a_draft_lane_card_without_a_drafter_has_no_buttons() -> None:
     db, slack = FakeDb(), FakeSlack()
     run(make_deps(db, FakeClassifier(llm("meeting_request", 0.9)), slack))
     blocks = slack.posts[0]["blocks"]
-    buttons = next(b for b in blocks if b["type"] == "actions")["elements"]
-    assert [b["action_id"] for b in buttons] == ["reply_approve", "reply_edit", "reply_skip"]
-    thread_id = rows(db, "threads")[0]["id"]
-    assert {b["value"] for b in buttons} == {thread_id}
-    assert "draft (no draft yet" in all_text(blocks)
-    assert rows(db, "slack_cards")[0]["lane"] == "human_only"  # until C3 attaches a draft
+    assert "actions" not in [b["type"] for b in blocks]
+    assert rows(db, "slack_cards")[0]["lane"] == "human_only"  # no draft, so no draft card
     assert not rows(db, "drafts")
 
 

@@ -1,19 +1,31 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
+from fastapi.concurrency import run_in_threadpool
 
 from app.config.settings import get_settings
+from app.examples.learn import learn_once
 from app.ingest.log_redact import install_redaction
 from app.ingest.webhook import get_deps
 from app.ingest.webhook import router as webhook_router
-from app.send.sender import SendConfig, SendService
 from app.slack.app import create_slack_handler
 from app.slack.app import router as slack_router
-from app.slack.service import CardService
-from app.templates.facts import load_facts
-from app.templates.playbook import load_playbook
+from app.slack.feedback import record_feedback
+
+log = logging.getLogger(__name__)
+
+
+async def learning_loop(app: FastAPI, minutes: int) -> None:
+    """Every `minutes`, save the replies Ray sent as new examples. Read only; never raises."""
+    while True:
+        await asyncio.sleep(minutes * 60)
+        try:
+            await run_in_threadpool(learn_once, get_deps(app))
+        except Exception as exc:  # noqa: BLE001 - keep looping; the next run tries again
+            log.error("learning loop run failed: %s", type(exc).__name__)
 
 
 @asynccontextmanager
@@ -21,35 +33,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()  # fail fast at startup if configuration is incomplete
     install_redaction()  # keep ?secret=... out of uvicorn's access log
     if not settings.gmc_campaign_ids:
-        logging.getLogger(__name__).warning(
-            "GMC_CAMPAIGN_IDS is empty: every Smartlead webhook will be ignored"
+        log.warning("GMC_CAMPAIGN_IDS is empty: every Smartlead webhook will be ignored")
+    if settings.SEND_ENABLED:
+        log.warning(
+            "SEND_ENABLED is on, but the bot no longer sends: a person sends from Smartlead"
         )
 
-    facts = load_facts()
-    playbook = load_playbook(facts=facts)  # fails fast if playbook.yaml is malformed
-    if not playbook.templates:
-        logging.getLogger(__name__).warning(
-            "playbook.yaml has no templates: every reply goes to a human with no draft"
-        )
-    send_config = SendConfig.from_settings(settings)
-    log = logging.getLogger(__name__)
-    if settings.LIVE_SEND_ALL:
-        log.warning(
-            "LIVE_SEND_ALL is ON: the allowlist is bypassed. It must stay off until go-live"
-        )
-    elif settings.SEND_ENABLED and not send_config.allowlist:
-        log.warning("SEND_ENABLED is on but SEND_ALLOWLIST is empty: nothing can be sent")
-    elif settings.SEND_ENABLED:
-        log.warning(
-            "SEND_ENABLED is on: replies go only to %d allowlisted address(es)",
-            len(send_config.allowlist),
-        )
-    sender = SendService(
-        lambda: get_deps(app).db, lambda: get_deps(app).smartlead, playbook, facts, send_config
-    )
-    service = CardService(lambda: get_deps(app).db, playbook, facts, sender)
-    app.state.slack_handler = create_slack_handler(settings, service=service)
+    def feedback(channel: str, ts: str, action_id: str, user_id: str) -> bool:
+        return record_feedback(get_deps(app).db, channel, ts, action_id, user_id)
+
+    app.state.slack_handler = create_slack_handler(settings, feedback=feedback)
+    task = None
+    if settings.LEARN_INTERVAL_MINUTES > 0:
+        task = asyncio.create_task(learning_loop(app, settings.LEARN_INTERVAL_MINUTES))
     yield
+    if task is not None:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 app = FastAPI(title="AI Reply Bot", lifespan=lifespan)

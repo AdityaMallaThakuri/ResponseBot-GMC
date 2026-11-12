@@ -17,9 +17,12 @@ from app.classify.classifier import Classification
 from app.classify.routing import LANE_HUMAN_ONLY, Route
 from app.db.client import Row, fetch_drafts, insert_draft
 from app.db.records import DraftStatus, NewDraft
+from app.examples.drafter import DRAFT_VERSION
 from app.ingest.deps import IngestDeps
 from app.smartlead.models import Message
-from app.validate.validator import explain
+from app.validate.validator import explain, placeholders
+
+EXAMPLES_TEMPLATE_ID = "examples"  # drafts.template_id for a draft written from examples
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,7 @@ class DraftView:
     edited: bool
     notes: tuple[str, ...]
     approve_allowed: bool
+    flags: tuple[str, ...] = ()  # numbers, prices and percentages in the draft
 
 
 def notes_for(approve_blockers: list[str], warnings: list[str]) -> tuple[str, ...]:
@@ -52,13 +56,67 @@ def view_from_row(row: Row) -> tuple[Route | None, DraftView]:
     blockers = list(result.get("approve_blockers") or [])
     warnings = list(result.get("warnings") or [])
     edited = bool(row.get("human_edited"))
+    text = row.get("final_text") or row["text"]
+    notes = notes_for(blockers, warnings)
+    if row["template_id"] == EXAMPLES_TEMPLATE_ID and placeholders(text):
+        notes = (*notes, "Fill in " + ", ".join(placeholders(text)) + " before you send.")
     return None, DraftView(
-        row.get("final_text") or row["text"],
+        text,
         row["template_id"],
         edited,
-        notes_for(blockers, warnings),
+        notes,
         approve_allowed=not blockers,
+        flags=tuple(result.get("flagged") or ()),
     )
+
+
+def _prepare_from_examples(
+    deps: IngestDeps,
+    thread: Row,
+    classification_id: str,
+    result: Classification,
+    reply: Message,
+    outreach: str,
+    plan: Route,
+) -> tuple[Route, DraftView | None, str | None]:
+    outcome = deps.example_drafter.draft(
+        thread=thread,
+        label=result.label,
+        confidence=result.confidence,
+        reply=reply.text,
+        outreach=outreach,
+        min_confidence=deps.config.draft_min_confidence,
+    )
+    if outcome.kind != "drafted" or not outcome.text:
+        note = f"No draft: {outcome.reason}"
+        return (
+            Route(LANE_HUMAN_ONLY, outcome.reason),
+            DraftView(None, None, False, (note,), False),
+            None,
+        )
+    row = insert_draft(
+        deps.db,
+        NewDraft(
+            thread_id=thread["id"],
+            classification_id=classification_id,
+            template_id=EXAMPLES_TEMPLATE_ID,
+            template_version=DRAFT_VERSION,
+            text=outcome.text,
+            validator_ok=True,
+            slots={"example_ids": list(outcome.example_ids)},
+            status=DraftStatus.PROPOSED,
+            model=outcome.model,
+            validator_result={
+                "ok": True,
+                "blocking": [],
+                "approve_blockers": [],
+                "warnings": [],
+                "flagged": list(outcome.flagged),
+            },
+        ),
+    )
+    _, view = view_from_row(row)
+    return plan, view, row["id"]
 
 
 def prepare_draft(
@@ -77,6 +135,10 @@ def prepare_draft(
         blocked_route, view = view_from_row(row)
         return (blocked_route or plan), view, row["id"]
 
+    if deps.example_drafter is not None:
+        return _prepare_from_examples(
+            deps, thread, classification_id, result, reply, outreach, plan
+        )
     outcome = deps.drafter.draft(
         thread=thread,
         label=result.label,
@@ -115,5 +177,5 @@ def prepare_draft(
 
 
 def draft_enabled(deps: IngestDeps) -> bool:
-    drafter: Any = deps.drafter
+    drafter: Any = deps.example_drafter or deps.drafter
     return drafter is not None

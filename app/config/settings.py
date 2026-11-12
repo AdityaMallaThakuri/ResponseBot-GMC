@@ -82,12 +82,22 @@ class Settings(BaseSettings):
     DRAFT_MIN_CONFIDENCE: float = DEFAULT_DRAFT_MIN_CONFIDENCE
     # The model that fills the few variable slots of a template (never writes free text).
     DRAFT_MODEL: str = "claude-sonnet-5-5"
+    # The learning loop reads threads from Smartlead (read only) this often, in minutes, and saves
+    # the replies Ray sent as new examples. 0 turns the loop off.
+    LEARN_INTERVAL_MINUTES: int = 30
     # Slack channels (name or id). Optional until the step that posts to them is built.
     SLACK_DRAFT_CHANNEL: str | None = None
     SLACK_LOG_CHANNEL: str | None = None
     SLACK_ALERT_CHANNEL: str | None = None
     SLACK_SHADOW_CHANNEL: str | None = None
     SLACK_OPS_CHANNEL: str | None = None
+
+    @field_validator("LEARN_INTERVAL_MINUTES", mode="before")
+    @classmethod
+    def _blank_interval_is_default(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return cls.model_fields["LEARN_INTERVAL_MINUTES"].default
+        return value
 
     @field_validator("CLASSIFIER_MODEL", "DRAFT_LABEL_MODEL", "DRAFT_MODEL", mode="before")
     @classmethod

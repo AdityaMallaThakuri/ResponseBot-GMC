@@ -201,6 +201,27 @@ class NewDraft:
     validator_result: dict[str, Any] | None = None  # blocking, approve_blockers, warnings
 
 
+class ExampleSource(StrEnum):
+    HISTORY = "history"  # loaded from the past replies dataset
+    RAY_SENT = "ray_sent"  # learned from a reply Ray sent after we posted a draft
+
+
+@dataclass(frozen=True)
+class NewExample:
+    """One answered reply: what the prospect said and what Gamic sent (reply_examples)."""
+
+    source: ExampleSource
+    source_thread_id: str
+    label: str
+    prospect_reply: str
+    gamic_reply: str
+    campaign_name: str = ""
+    replied_at: datetime | None = None
+    thread_id: str | None = None
+    draft_id: str | None = None
+    draft_similarity: float | None = None  # 0 to 100: our draft against what Ray sent
+
+
 @dataclass(frozen=True)
 class NewDecision:
     draft_id: str

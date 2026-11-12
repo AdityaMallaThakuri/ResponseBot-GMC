@@ -265,11 +265,7 @@ class CardService:
             if "confidence" in classification
             else None,
             reason=classification.get("reason", ""),
-            buttons=True,
             draft_text=view.text,
-            template_id=view.template_id,
-            draft_edited=view.edited,
             draft_notes=view.notes,
-            approve_allowed=view.approve_allowed,
         )
         return EditResult(build_reply_card_blocks(shown), reply_fallback_text(shown), warnings)
