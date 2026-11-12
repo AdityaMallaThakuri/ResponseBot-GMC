@@ -6,7 +6,8 @@ Usage:
 
 For a thread whose webhook event was stored before classification existed, or whose C2 step
 failed. It reads the thread and messages from the database, runs the same step as the webhook
-(rules, then the model, then the lane and the Slack card) and ADDS a classification row and a
+(rules, then the model, then the lane, the draft from past examples and the Slack card) and ADDS
+a classification row and a
 Slack card row. It deletes and changes nothing, and it never calls Smartlead: the Smartlead
 client is replaced by a guard that raises if anything touches it. It does call the Anthropic API
 and posts to Slack. Running it again does nothing once the thread has a card. Prints no email text.
@@ -72,14 +73,23 @@ def build(settings: Any) -> IngestDeps:
 
     from app.classify.classifier import Classifier
     from app.db.connect import create_db
+    from app.examples.drafter import ExampleDrafter
+    from app.examples.library import load_pool
     from app.ingest.deps import IngestConfig
 
     claude = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, max_retries=5)
+    db = create_db(settings)
     return IngestDeps(
-        db=create_db(settings),
+        db=db,
         smartlead=NoSmartlead(),
         classifier=Classifier(claude, settings.CLASSIFIER_MODEL),
         slack=WebClient(token=settings.SLACK_BOT_TOKEN),
+        example_drafter=ExampleDrafter(
+            lambda label: load_pool(db, label),
+            claude,
+            settings.DRAFT_MODEL,
+            settings.PRICE_SENTENCE,
+        ),
         config=IngestConfig.from_settings(settings),
     )
 

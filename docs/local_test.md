@@ -70,7 +70,18 @@ The server (window A) must be running. The server fetches the real thread from S
 lead in the fixture must exist in campaign 4043678. Sequence:
 
 ```
-.venv\Scripts\python scripts\replay_webhook.py --url http://127.0.0.1:8000/webhooks/smartlead --fresh --check
+.venv\Scripts\python scripts\replay_webhook.py tests\fixtures\webhook_lender_reply.json --url http://localhost:8000/webhooks/smartlead --fresh --check
+```
+
+Name the lender fixture: without it the script sends a different default fixture, which the server
+ignores. If the lead's thread already has a card from an earlier test, the replay is stored but no
+new card is posted (a thread is classified and posted once). Remove only that old test card (get its
+id with `select id, lane, created_at from slack_cards order by created_at desc limit 5;`), dry run
+first, then re-post the stored thread with `reclassify_stored.py` below:
+
+```
+.venv\Scripts\python scripts\remove_test_card.py --card-id <CARD UUID>
+.venv\Scripts\python scripts\remove_test_card.py --card-id <CARD UUID> --apply
 ```
 
 (`--fresh` uses a new reply time so it is not a duplicate. `--check` waits, then reads back the

@@ -137,9 +137,20 @@ class ReplyCard:
     draft_text: str | None = None
     draft_flags: tuple[str, ...] = ()  # numbers, prices and percentages in the draft
     draft_notes: tuple[str, ...] = ()
+    thread_url: str | None = None  # opens the thread in Smartlead's master inbox
 
 
 DRAFT_LIMIT = 2800  # a Slack section holds 3000 characters
+SMARTLEAD_THREAD_URL = "https://app.smartlead.ai/app/master-inbox?action=INBOX&leadMap={}"
+
+
+def smartlead_thread_url(lead_map_id: object) -> str | None:
+    """The master-inbox link for a thread (leadMap is the email_lead_map_id), or None."""
+    try:
+        number = int(lead_map_id)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return None
+    return SMARTLEAD_THREAD_URL.format(number) if number > 0 else None
 FENCE = "`" * 3
 
 
@@ -221,6 +232,9 @@ def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
     if card.draft_text is not None:
         text = f"*Draft reply* (copy it)\n{code_block(card.draft_text)}"
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": text}})
+    if card.thread_url:
+        link = f"<{escape_mrkdwn(card.thread_url)}|Open thread in Smartlead>"
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": link}]})
     if card.draft_flags:
         figures = ", ".join(f"`{escape_mrkdwn(f)}`" for f in card.draft_flags)
         warning = f":warning: *Check these figures before you send:* {figures}"

@@ -146,3 +146,26 @@ def test_posting_returns_the_ts_and_the_channel_id() -> None:
             return {"ts": "3.4"}
 
     assert post_reply_card(NoChannel(), "named", card()) == ("3.4", "named")
+
+
+def test_the_card_links_to_the_thread_in_smartlead() -> None:
+    from app.slack.card import ReplyCard, build_reply_card_blocks, smartlead_thread_url
+
+    url = smartlead_thread_url("3966392897")
+    assert url == "https://app.smartlead.ai/app/master-inbox?action=INBOX&leadMap=3966392897"
+    card = ReplyCard(
+        thread_ref="t", lead_name="A", campaign="GMC - X", reply="hi", lane="draft",
+        label="info_request", confidence=0.9, reason="r", draft_text="Hey", thread_url=url,
+    )
+    text = str(build_reply_card_blocks(card))
+    assert "<https://app.smartlead.ai/app/master-inbox?action=INBOX&amp;leadMap=3966392897" in text
+    assert "Open thread in Smartlead" in text
+    without = str(build_reply_card_blocks(ReplyCard(**{**card.__dict__, "thread_url": None})))
+    assert "Open thread in Smartlead" not in without
+
+
+def test_no_link_without_a_usable_lead_map_id() -> None:
+    from app.slack.card import smartlead_thread_url
+
+    assert [smartlead_thread_url(v) for v in (None, "", "abc", 0, -3)] == [None] * 5
+    assert smartlead_thread_url(42).endswith("leadMap=42")

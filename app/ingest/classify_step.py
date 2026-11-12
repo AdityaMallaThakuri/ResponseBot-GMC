@@ -38,7 +38,7 @@ from app.db.records import (
 )
 from app.ingest.deps import IngestDeps
 from app.ingest.draft_step import DraftView, draft_enabled, prepare_draft
-from app.slack.card import ReplyCard, post_reply_card
+from app.slack.card import ReplyCard, post_reply_card, smartlead_thread_url
 from app.smartlead.models import Direction, Message
 
 logger = logging.getLogger(__name__)
@@ -138,6 +138,7 @@ def _card(
         draft_text=view.text if view else None,
         draft_flags=view.flags if view else (),
         draft_notes=view.notes if view else (),
+        thread_url=smartlead_thread_url(thread.get("email_lead_map_id")),
     )
 
 
