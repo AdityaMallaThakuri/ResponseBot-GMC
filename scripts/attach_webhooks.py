@@ -2,8 +2,8 @@
 
 Usage:
     python scripts/attach_webhooks.py --base-url https://YOUR-APP.up.railway.app
-        Read only. Prints the GMC campaigns (and their "POS REPLY" children), which already have
-        our webhook, and the GMC_CAMPAIGN_IDS value to set. Changes nothing.
+        Read only. Prints the GMC campaigns and their POS REPLY children (found by
+        parent_campaign_id, shown with the parent's name), which already have our webhook, and the GMC_CAMPAIGN_IDS value to set. Changes nothing.
     python scripts/attach_webhooks.py --base-url ... --apply
         Creates our webhook on each campaign that lacks it, after you typed the count to confirm.
 
@@ -35,14 +35,20 @@ class CampaignRow:
     status: str
     pos_reply: bool
     has_ours: bool
+    parent_name: str = ""
 
 
 def is_gmc(name: str) -> bool:
     return name.strip().lower().startswith("gmc")
 
 
-def is_pos_reply(name: str) -> bool:
-    return "pos reply" in name.lower()
+def has_client(campaign: dict[str, Any]) -> bool:
+    return campaign.get("client_id") not in (None, "", 0)
+
+
+def parent_id(campaign: dict[str, Any]) -> int | None:
+    value = campaign.get("parent_campaign_id")
+    return int(value) if value not in (None, "", 0) else None
 
 
 def webhook_url(base_url: str, secret: str) -> str:
@@ -56,29 +62,43 @@ def is_ours(hook: dict[str, Any], base_url: str) -> bool:
 
 
 def gather(client: Any, base_url: str) -> list[CampaignRow]:
+    """GMC campaigns plus their POS REPLY children.
+
+    A GMC campaign: its name starts with "GMC". A POS REPLY child: its parent_campaign_id is one
+    of those GMC campaigns (the name is not used). Any campaign with a client_id is excluded.
+    """
+    campaigns = [c for c in client.list_campaigns() if not has_client(c)]
+    parents = {
+        int(c["id"]): str(c.get("name") or "") for c in campaigns if is_gmc(c.get("name") or "")
+    }
     rows = []
-    for campaign in client.list_campaigns():
-        name = str(campaign.get("name") or "")
-        if not is_gmc(name):
-            continue
+    for campaign in campaigns:
         cid = int(campaign["id"])
+        pid = parent_id(campaign)
+        if cid in parents:
+            parent_name, pos_reply = "", False
+        elif pid in parents:
+            parent_name, pos_reply = parents[pid], True
+        else:
+            continue
         hooks = client.list_campaign_webhooks(cid)
         rows.append(
             CampaignRow(
                 cid,
-                name,
+                str(campaign.get("name") or ""),
                 str(campaign.get("status") or ""),
-                is_pos_reply(name),
+                pos_reply,
                 any(is_ours(h, base_url) for h in hooks),
+                parent_name,
             )
         )
-    return sorted(rows, key=lambda r: (r.name.lower(), r.id))
+    return sorted(rows, key=lambda r: (r.parent_name or r.name, r.pos_reply, r.id))
 
 
 def show(rows: list[CampaignRow]) -> None:
-    print(f"{len(rows)} GMC campaigns:")
+    print(f"{len(rows)} GMC campaigns (including POS REPLY children):")
     for r in rows:
-        tag = "  [POS REPLY]" if r.pos_reply else ""
+        tag = f"  [POS REPLY of: {r.parent_name}]" if r.pos_reply else ""
         ours = "webhook already attached" if r.has_ours else "NO webhook of ours"
         print(f"  {r.id:>9}  {r.status:<10} {r.name}{tag}  ({ours})")
     ids = ",".join(str(r.id) for r in rows)

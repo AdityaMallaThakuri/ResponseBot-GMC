@@ -13,21 +13,29 @@ def make_client(handler) -> SmartleadClient:
     return SmartleadClient("k", transport=httpx.MockTransport(handler), sleep=lambda s: None)
 
 
-def test_gmc_names_and_pos_reply() -> None:
+def test_gmc_names() -> None:
     assert aw.is_gmc("GMC - Lenders") and aw.is_gmc("gmc x") and not aw.is_gmc("Client - GMC")
-    assert aw.is_pos_reply("GMC - Lenders POS REPLY") and not aw.is_pos_reply("GMC - Lenders")
 
 
-def test_gather_lists_only_gmc_and_marks_existing_hooks() -> None:
+def test_gather_picks_children_by_parent_id_and_excludes_client_campaigns() -> None:
     calls = []
 
     def handler(req: httpx.Request) -> httpx.Response:
-        calls.append((req.method, req.url.path))
+        calls.append(req.method)
         if req.url.path.endswith("/campaigns/"):
             return httpx.Response(200, json=[
                 {"id": 1, "name": "GMC - A", "status": "ACTIVE"},
-                {"id": 2, "name": "GMC - A POS REPLY", "status": "ACTIVE"},
-                {"id": 3, "name": "Other client", "status": "ACTIVE"},
+                # child by parent id; the name does not say POS REPLY
+                {"id": 2, "name": "A follow-up", "parent_campaign_id": 1},
+                # named POS REPLY but its parent is not a GMC campaign: not counted
+                {"id": 3, "name": "GMC - B POS REPLY", "parent_campaign_id": 99},
+                {"id": 4, "name": "Other POS REPLY", "parent_campaign_id": 99},
+                # a client campaign named GMC, and a child of it
+                {"id": 5, "name": "GMC - C", "client_id": 7},
+                {"id": 6, "name": "C POS REPLY", "parent_campaign_id": 5},
+                # a child of a GMC campaign that has a client_id itself
+                {"id": 7, "name": "GMC - A kid", "parent_campaign_id": 1, "client_id": 3},
+                {"id": 8, "name": "Unrelated"},
             ])
         if req.url.path.endswith("/1/webhooks"):
             ours = f"{BASE}/webhooks/smartlead?secret=x"
@@ -35,8 +43,10 @@ def test_gather_lists_only_gmc_and_marks_existing_hooks() -> None:
         return httpx.Response(200, json=[{"webhook_url": "https://other.example/hook"}])
 
     rows = aw.gather(make_client(handler), BASE)
-    assert [(r.id, r.pos_reply, r.has_ours) for r in rows] == [(1, False, True), (2, True, False)]
-    assert all(m == "GET" for m, _ in calls)  # read only
+    got = [(r.id, r.pos_reply, r.parent_name, r.has_ours) for r in rows]
+    # id 3 is GMC-named so it is a GMC campaign itself, not a child; the others are excluded
+    assert got == [(1, False, "", True), (2, True, "GMC - A", False), (3, False, "", False)]
+    assert all(m == "GET" for m in calls)  # read only
 
 
 def test_apply_creates_only_where_missing_and_only_one_event() -> None:
