@@ -32,6 +32,8 @@ from app.db.records import NewRawEvent, RawSource, payload_hash
 from app.ingest.deps import IngestDeps, build_deps
 from app.ingest.log_redact import QUERY_SECRET_PARAM
 from app.ingest.process import process_reply_event
+from app.smartlead.errors import SmartleadError
+from app.smartlead.watch import CampaignWatcher
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -181,13 +183,23 @@ async def smartlead_webhook(request: Request, background: BackgroundTasks) -> JS
         campaign = int(campaign_id)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         campaign = None
-    if campaign is None or campaign not in settings.gmc_campaign_ids:
-        logger.info("smartlead webhook ignored: campaign_id=%s not in GMC_CAMPAIGN_IDS", campaign)
+    deps = get_deps(request.app)
+    if campaign is None:
+        logger.info("smartlead webhook ignored: no usable campaign_id")
+        return _reply("ignored", reason="campaign")
+    if deps.watcher is None:
+        deps.watcher = CampaignWatcher(deps.smartlead, get_settings)
+    try:
+        watched = await run_in_threadpool(deps.watcher.is_watched, campaign)
+    except SmartleadError as exc:  # cannot tell: let Smartlead retry rather than lose the reply
+        logger.error("smartlead webhook: could not list campaigns: %s", exc)
+        raise HTTPException(status_code=503, detail="campaign list unavailable") from None
+    if not watched:
+        logger.info("smartlead webhook ignored: campaign_id=%s is not a watched campaign", campaign)
         return _reply("ignored", reason="campaign")
 
     stored = {k: v for k, v in payload.items() if k != SECRET_BODY_FIELD}
     key, fields = event_key(stored)
-    deps = get_deps(request.app)
     try:
         result = await run_in_threadpool(
             insert_raw_event, deps.db, NewRawEvent(RawSource.SMARTLEAD_WEBHOOK, stored, key)

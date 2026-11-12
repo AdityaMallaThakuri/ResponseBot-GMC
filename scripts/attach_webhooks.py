@@ -1,18 +1,21 @@
-"""List the GMC campaigns and attach our EMAIL_REPLY webhook to them (only with --apply).
+"""Attach or detach OUR EMAIL_REPLY webhook on the watched campaigns (manual version of the job).
 
-Usage:
-    python scripts/attach_webhooks.py --base-url https://YOUR-APP.up.railway.app
-        Read only. Prints the GMC campaigns and their POS REPLY children (found by
-        parent_campaign_id, shown with the parent's name), which already have our webhook,
-        and the GMC_CAMPAIGN_IDS value to set. Changes nothing.
-    python scripts/attach_webhooks.py --base-url ... --apply
-        Creates our webhook on each campaign that lacks it, after you typed the count to confirm.
+Usage (every mode is a dry run unless --apply is given):
+    python scripts/attach_webhooks.py                      # list watched campaigns, who lacks ours
+    python scripts/attach_webhooks.py --apply              # attach ours where missing (asks first)
+    python scripts/attach_webhooks.py --detach-ours        # list OUR webhooks that would be removed
+    python scripts/attach_webhooks.py --detach-ours --apply
+    --base-url https://abc.ngrok-free.app   overrides PUBLIC_BASE_URL (which webhook is "ours")
+    --campaign-id 123 [--campaign-id 456]     limit --detach-ours to these campaigns
 
-Why per campaign: Smartlead also has an account-level ("user") webhook, but it overrides every
-campaign-level webhook for the same event, which would silently break any other integration.
+Watched campaigns follow the same rule as the app (app/smartlead/watch.py): name starts with
+"GMC" and no client_id, or a child by parent_campaign_id; IGNORE_CAMPAIGN_IDS removed; if
+GMC_CAMPAIGN_IDS is set only those. Why per campaign and not the account-level Smartlead webhook:
+that one overrides every campaign webhook and could break other integrations.
 
-Safety: it only calls POST /webhook/create (never update or delete), skips a campaign that already
-has our URL, never touches another webhook, and never prints the secret. It does not send email.
+Safety: attach only calls POST /webhook/create. Detach deletes only a webhook whose URL has our
+host and path (the base URL plus /webhooks/smartlead), by its own id, never any other webhook.
+The secret is never printed. Nothing here sends email.
 """
 
 from __future__ import annotations
@@ -25,85 +28,43 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-WEBHOOK_NAME = "Reply Bot (EMAIL_REPLY)"
-PATH = "/webhooks/smartlead"
+from app.smartlead.watch import (  # noqa: E402
+    PATH,
+    WEBHOOK_NAME,
+    Watched,
+    is_ours,
+    watched_campaigns,
+    webhook_url,
+)
 
 
 @dataclass(frozen=True)
 class CampaignRow:
-    id: int
-    name: str
-    status: str
-    pos_reply: bool
+    campaign: Watched
     has_ours: bool
-    parent_name: str = ""
+
+    @property
+    def id(self) -> int:
+        return self.campaign.id
 
 
-def is_gmc(name: str) -> bool:
-    return name.strip().lower().startswith("gmc")
-
-
-def has_client(campaign: dict[str, Any]) -> bool:
-    return campaign.get("client_id") not in (None, "", 0)
-
-
-def parent_id(campaign: dict[str, Any]) -> int | None:
-    value = campaign.get("parent_campaign_id")
-    return int(value) if value not in (None, "", 0) else None
-
-
-def webhook_url(base_url: str, secret: str) -> str:
-    return f"{base_url.rstrip('/')}{PATH}?secret={secret}"
-
-
-def is_ours(hook: dict[str, Any], base_url: str) -> bool:
-    """Our webhook: same host and path (the secret is ignored in the comparison)."""
-    url = str(hook.get("webhook_url") or "")
-    return url.split("?")[0].rstrip("/") == f"{base_url.rstrip('/')}{PATH}"
-
-
-def gather(client: Any, base_url: str) -> list[CampaignRow]:
-    """GMC campaigns plus their POS REPLY children.
-
-    A GMC campaign: its name starts with "GMC". A POS REPLY child: its parent_campaign_id is one
-    of those GMC campaigns (the name is not used). Any campaign with a client_id is excluded.
-    """
-    campaigns = [c for c in client.list_campaigns() if not has_client(c)]
-    parents = {
-        int(c["id"]): str(c.get("name") or "") for c in campaigns if is_gmc(c.get("name") or "")
-    }
-    rows = []
-    for campaign in campaigns:
-        cid = int(campaign["id"])
-        pid = parent_id(campaign)
-        if cid in parents:
-            parent_name, pos_reply = "", False
-        elif pid in parents:
-            parent_name, pos_reply = parents[pid], True
-        else:
-            continue
-        hooks = client.list_campaign_webhooks(cid)
-        rows.append(
-            CampaignRow(
-                cid,
-                str(campaign.get("name") or ""),
-                str(campaign.get("status") or ""),
-                pos_reply,
-                any(is_ours(h, base_url) for h in hooks),
-                parent_name,
-            )
-        )
-    return sorted(rows, key=lambda r: (r.parent_name or r.name, r.pos_reply, r.id))
+def gather(
+    client: Any, base_url: str, override: frozenset[int], ignore: frozenset[int]
+) -> list[CampaignRow]:
+    campaigns = client.list_campaigns()
+    return [
+        CampaignRow(w, any(is_ours(h, base_url) for h in client.list_campaign_webhooks(w.id)))
+        for w in watched_campaigns(campaigns, override, ignore)
+    ]
 
 
 def show(rows: list[CampaignRow]) -> None:
-    print(f"{len(rows)} GMC campaigns (including POS REPLY children):")
+    print(f"{len(rows)} watched campaigns (including POS REPLY children):")
     for r in rows:
-        tag = f"  [POS REPLY of: {r.parent_name}]" if r.pos_reply else ""
+        w = r.campaign
+        tag = f"  [POS REPLY of: {w.parent_name}]" if w.parent_name else ""
         ours = "webhook already attached" if r.has_ours else "NO webhook of ours"
-        print(f"  {r.id:>9}  {r.status:<10} {r.name}{tag}  ({ours})")
-    ids = ",".join(str(r.id) for r in rows)
-    print(f"\nGMC_CAMPAIGN_IDS={ids}")
+        print(f"  {w.id:>9}  {w.status:<10} {w.name}{tag}  ({ours})")
 
 
 def apply(client: Any, rows: list[CampaignRow], url: str) -> int:
@@ -113,37 +74,86 @@ def apply(client: Any, rows: list[CampaignRow], url: str) -> int:
             continue
         client.create_campaign_webhook(r.id, WEBHOOK_NAME, url)
         done += 1
-        print(f"  attached to {r.id} {r.name}")
+        print(f"  attached to {r.id} {r.campaign.name}")
     return done
+
+
+def find_ours(
+    client: Any, campaign_ids: list[int], base_url: str
+) -> list[tuple[int, dict[str, Any]]]:
+    """(campaign id, webhook) for every webhook of ours on these campaigns. Read only."""
+    found = []
+    for cid in campaign_ids:
+        for hook in client.list_campaign_webhooks(cid):
+            if is_ours(hook, base_url) and hook.get("id") is not None:
+                found.append((cid, hook))
+    return found
+
+
+def detach(client: Any, found: list[tuple[int, dict[str, Any]]], base_url: str) -> int:
+    """Delete only webhooks of ours, by id. Re-checks each one right before deleting it."""
+    done = 0
+    for cid, hook in found:
+        if not is_ours(hook, base_url):  # never delete anything else
+            continue
+        client.delete_webhook(int(hook["id"]))
+        done += 1
+        print(f"  removed our webhook {hook['id']} from campaign {cid}")
+    return done
+
+
+def confirm(count: int, what: str) -> bool:
+    answer = input(f"Type {count} to {what}: ").strip()
+    if answer != str(count):
+        print("Not confirmed. Nothing changed.")
+        return False
+    return True
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", required=True, help="the deployed app's public URL")
-    parser.add_argument("--apply", action="store_true", help="really create the webhooks")
+    parser.add_argument("--base-url", help="overrides PUBLIC_BASE_URL")
+    parser.add_argument("--apply", action="store_true", help="really change things")
+    parser.add_argument("--detach-ours", action="store_true", help="remove OUR webhook only")
+    parser.add_argument("--campaign-id", type=int, action="append", default=[])
     args = parser.parse_args()
 
     from app.config.settings import get_settings
     from app.smartlead.client import SmartleadClient
 
     settings = get_settings()
-    client = SmartleadClient(settings.SMARTLEAD_API_KEY)  # read and webhook-create only
-    rows = gather(client, args.base_url)
+    base = (args.base_url or settings.PUBLIC_BASE_URL).strip()
+    if not base:
+        sys.exit("Give --base-url or set PUBLIC_BASE_URL.")
+    client = SmartleadClient(settings.SMARTLEAD_API_KEY)
+    override, ignore = settings.gmc_campaign_ids, settings.ignore_campaign_ids
+    print(f"Our webhook URL: {base.rstrip('/')}{PATH}?secret=***")
+
+    if args.detach_ours:
+        if args.campaign_id:
+            ids = args.campaign_id
+        else:
+            ids = [w.id for w in watched_campaigns(client.list_campaigns(), override, ignore)]
+        found = find_ours(client, ids, base)
+        print(f"Scanned {len(ids)} campaigns: {len(found)} webhooks of ours:")
+        for cid, hook in found:
+            print(f"  campaign {cid}: webhook {hook['id']} ({hook.get('name') or 'no name'})")
+        if not args.apply:
+            print("Dry run: nothing removed. Re-run with --apply to remove them.")
+            return
+        if found and confirm(len(found), "remove them"):
+            print(f"Removed {detach(client, found, base)}.")
+        return
+
+    rows = gather(client, base, override, ignore)
     show(rows)
     todo = [r for r in rows if not r.has_ours]
-    print(f"\nTarget URL: {args.base_url.rstrip('/')}{PATH}?secret=*** (EMAIL_REPLY only)")
     if not args.apply:
-        print(f"Dry run: {len(todo)} would get the webhook. Re-run with --apply to attach.")
+        print(f"\nDry run: {len(todo)} would get the webhook. Re-run with --apply to attach.")
         return
-    if not todo:
-        print("Nothing to attach.")
-        return
-    answer = input(f"Type {len(todo)} to attach to {len(todo)} campaigns: ").strip()
-    if answer != str(len(todo)):
-        print("Not confirmed. Nothing changed.")
-        return
-    n = apply(client, rows, webhook_url(args.base_url, settings.WEBHOOK_SECRET))
-    print(f"Attached {n}. Set GMC_CAMPAIGN_IDS in Railway to the value printed above.")
+    if todo and confirm(len(todo), f"attach to {len(todo)} campaigns"):
+        n = apply(client, rows, webhook_url(base, settings.WEBHOOK_SECRET))
+        print(f"Attached {n}.")
 
 
 if __name__ == "__main__":

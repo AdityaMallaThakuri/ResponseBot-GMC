@@ -67,9 +67,15 @@ class Settings(BaseSettings):
     LIVE_SEND_ALL: bool = False
     CATEGORY_WRITEBACK_ENABLED: bool = False
     WEBHOOK_SECRET: str
-    # Smartlead campaign ids the bot handles, comma separated (for example "101,102").
-    # Replies from any other campaign are ignored. Empty means every reply is ignored.
+    # Campaigns are watched automatically (app/smartlead/watch.py). GMC_CAMPAIGN_IDS (comma
+    # separated ids) is an optional override for testing: if set, only those ids are watched.
     GMC_CAMPAIGN_IDS: str = ""
+    # Never watched, comma separated ids.
+    IGNORE_CAMPAIGN_IDS: str = ""
+    # The app's public address, used to build the webhook URL the job attaches to campaigns.
+    PUBLIC_BASE_URL: str = ""
+    # false: the 60-minute job only reports what it would attach. true: it attaches our webhook.
+    AUTO_ATTACH_WEBHOOKS: bool = False
     # Model ids, checked against the Anthropic models docs on 2026-11-03.
     CLASSIFIER_MODEL: str = DEFAULT_MODEL
     DRAFT_LABEL_MODEL: str = DEFAULT_MODEL
@@ -152,7 +158,7 @@ class Settings(BaseSettings):
     def send_allowlist(self) -> frozenset[str]:
         return parse_allowlist(self.SEND_ALLOWLIST)
 
-    @field_validator("GMC_CAMPAIGN_IDS")
+    @field_validator("GMC_CAMPAIGN_IDS", "IGNORE_CAMPAIGN_IDS")
     @classmethod
     def _campaign_ids_are_integers(cls, value: str) -> str:
         parse_campaign_ids(value)
@@ -161,6 +167,10 @@ class Settings(BaseSettings):
     @property
     def gmc_campaign_ids(self) -> frozenset[int]:
         return parse_campaign_ids(self.GMC_CAMPAIGN_IDS)
+
+    @property
+    def ignore_campaign_ids(self) -> frozenset[int]:
+        return parse_campaign_ids(self.IGNORE_CAMPAIGN_IDS)
 
     @field_validator(*REQUIRED)
     @classmethod

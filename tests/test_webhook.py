@@ -270,16 +270,52 @@ def test_campaigns_outside_the_list_are_ignored_with_a_log_line(
         response = post(client, {**EVENT, "campaign_id": campaign})
         assert response.status_code == 200 and response.json()["reason"] == "campaign"
     assert rows(db, "raw_events") == []
-    assert "campaign_id=999 not in GMC_CAMPAIGN_IDS" in caplog.text
+    assert "campaign_id=999 is not a watched campaign" in caplog.text
     assert post(client, {**EVENT, "campaign_id": "102"}).json()["status"] == "accepted"
 
 
-def test_an_empty_campaign_list_ignores_everything(
-    client: TestClient, db: FakeDb, monkeypatch: pytest.MonkeyPatch
+def test_with_no_override_the_campaign_rule_decides(
+    client: TestClient, db: FakeDb, smartlead: FakeSmartlead, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("GMC_CAMPAIGN_IDS", "")
     get_settings.cache_clear()
-    assert post(client, EVENT).json()["reason"] == "campaign"
+    smartlead.list_campaigns = lambda: [  # type: ignore[attr-defined]
+        {"id": 101, "name": "GMC - A"},
+        {"id": 102, "name": "Client - B"},
+        {"id": 103, "name": "A POS REPLY", "parent_campaign_id": 101},
+        {"id": 104, "name": "GMC - C", "client_id": 5},
+    ]
+    assert post(client, EVENT).json()["status"] == "accepted"
+    assert post(client, {**EVENT, "campaign_id": 102}).json()["reason"] == "campaign"
+    assert post(client, {**EVENT, "campaign_id": 104}).json()["reason"] == "campaign"
+    assert [e["payload"]["campaign_id"] for e in rows(db, "raw_events")] == [101]
+
+
+def test_a_reply_from_a_campaign_created_after_the_cache_is_accepted(
+    client: TestClient, db: FakeDb, smartlead: FakeSmartlead, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GMC_CAMPAIGN_IDS", "")
+    get_settings.cache_clear()
+    campaigns = [{"id": 555, "name": "GMC - Old"}]
+    smartlead.list_campaigns = lambda: list(campaigns)  # type: ignore[attr-defined]
+    assert post(client, {**EVENT, "campaign_id": 101}).json()["reason"] == "campaign"
+    campaigns.append({"id": 101, "name": "GMC - New"})  # appears after the list was cached
+    assert post(client, EVENT).json()["status"] == "accepted"
+
+
+def test_when_campaigns_cannot_be_listed_the_webhook_answers_503(
+    client: TestClient, db: FakeDb, smartlead: FakeSmartlead, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.smartlead.errors import SmartleadError
+
+    monkeypatch.setenv("GMC_CAMPAIGN_IDS", "")
+    get_settings.cache_clear()
+
+    def fail() -> list[dict[str, Any]]:
+        raise SmartleadError("down")
+
+    smartlead.list_campaigns = fail  # type: ignore[attr-defined]
+    assert post(client, EVENT).status_code == 503
     assert rows(db, "raw_events") == []
 
 

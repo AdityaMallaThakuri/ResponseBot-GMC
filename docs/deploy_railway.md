@@ -26,7 +26,10 @@ Settings (not secret):
 | `LIVE_SEND_ALL` | `false` (set explicitly) |
 | `CATEGORY_WRITEBACK_ENABLED` | `false` |
 | `SEND_ALLOWLIST` | leave empty |
-| `GMC_CAMPAIGN_IDS` | from `scripts/attach_webhooks.py` (step 4); empty means every reply is ignored |
+| `GMC_CAMPAIGN_IDS` | leave EMPTY in production (campaigns are discovered automatically); a testing override only |
+| `IGNORE_CAMPAIGN_IDS` | optional: ids never watched |
+| `PUBLIC_BASE_URL` | the Railway domain, `https://<name>.up.railway.app` (no trailing path) |
+| `AUTO_ATTACH_WEBHOOKS` | `false` at first (the hourly job only reports, in the log and in Slack); `true` when you want it to attach |
 | `SLACK_DRAFT_CHANNEL` | channel for draft cards (name or id) |
 | `SLACK_ALERT_CHANNEL` | channel for notices (optional, falls back to the draft channel) |
 | `LEARN_INTERVAL_MINUTES` | `30` (the learning loop runs inside the app; 0 turns it off) |
@@ -77,25 +80,21 @@ at that project's `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` first:
 
 Then `select count(*) from reply_examples;` should show 579.
 
-## 4. Webhook coverage
+## 4. Webhook coverage (automatic)
 
-Smartlead does support an account-level webhook (`association_type: user`, covers all campaigns).
-Do not use it: Smartlead's docs say it overrides every client and campaign webhook, so it could
-silently break any other integration on the account. Use per-campaign webhooks instead:
+Campaigns are watched automatically: name starts with "GMC" and no `client_id`, or a campaign whose
+`parent_campaign_id` is a watched campaign (POS REPLY children), minus `IGNORE_CAMPAIGN_IDS`. The
+campaign list is cached for 10 minutes; a reply from an unknown campaign id refreshes it once.
 
-```
-.venv/Scripts/python scripts/attach_webhooks.py --base-url https://<name>.up.railway.app
-```
+When `PUBLIC_BASE_URL` is set, a job runs at startup and every 60 minutes: it lists campaigns, finds
+watched ones without our webhook and, if `AUTO_ATTACH_WEBHOOKS=true`, attaches an `EMAIL_REPLY`
+webhook with `?secret=` to them (one Slack note per newly watched campaign: "Now watching: <name>").
+With it `false` it only reports what it would attach. It never updates or deletes another webhook.
+(Smartlead's account-level webhook is not used: it overrides every campaign webhook.)
 
-This is read only: it lists GMC campaigns (POS REPLY ones are tagged), which already have our
-webhook, and prints `GMC_CAMPAIGN_IDS=...`. Check the list. To attach (needs `WEBHOOK_SECRET` in
-your local `.env`, the same value as in Railway):
+1. Deploy with `AUTO_ATTACH_WEBHOOKS=false`. Read the log and the Slack notes ("Would start
+   watching ...") to check the list is what you expect.
+2. Set `AUTO_ATTACH_WEBHOOKS=true` in Railway. The next run (it redeploys, so at once) attaches.
 
-```
-.venv/Scripts/python scripts/attach_webhooks.py --base-url https://<name>.up.railway.app --apply
-```
-
-It asks you to type the count, creates only an `EMAIL_REPLY` webhook with `?secret=`, skips
-campaigns that already have ours and never updates or deletes anything. Paste the printed
-`GMC_CAMPAIGN_IDS` into Railway. The list and create routes are from Smartlead's reference and
-unverified on live data; if the dry run fails, nothing was changed.
+By hand, the same rule: `scripts/attach_webhooks.py` (dry run by default, `--apply`). The list and
+create routes are from Smartlead's reference and unverified on live data.

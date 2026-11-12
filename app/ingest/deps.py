@@ -53,6 +53,8 @@ class IngestDeps:
     drafter: Any | None = None  # app.templates.engine.Drafter or a fake (templates: unused now)
     # Drafting from examples: app.examples.drafter.ExampleDrafter or a fake. Wins over `drafter`.
     example_drafter: Any | None = None
+    # Decides which campaigns are watched (app.smartlead.watch.CampaignWatcher); built on first use.
+    watcher: Any | None = None
     config: IngestConfig = field(default_factory=IngestConfig)
 
 

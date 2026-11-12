@@ -17,6 +17,8 @@ REQUIRED = {
 def env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in REQUIRED.items():
         monkeypatch.setenv(key, value)
+    monkeypatch.setenv("PUBLIC_BASE_URL", "")  # a local .env must not start the webhook job
+    monkeypatch.setenv("AUTO_ATTACH_WEBHOOKS", "false")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

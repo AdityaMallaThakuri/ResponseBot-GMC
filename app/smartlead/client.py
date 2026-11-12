@@ -232,6 +232,17 @@ class SmartleadClient:
             },
         )
 
+    def delete_webhook(self, webhook_id: int) -> None:
+        """Delete ONE webhook by id (used only by attach_webhooks.py --detach-ours).
+
+        Smartlead's docs disagree on the route, so the reference form is tried first and the
+        guide's form second. Either one removes only the webhook with this id.
+        """
+        try:
+            self._request("DELETE", "/webhook/delete", json={"id": webhook_id})
+        except SmartleadError:
+            self._request("DELETE", f"/webhook/delete/{webhook_id}")
+
     def get_lead_categories(self) -> Any:
         return self._request("GET", "/leads/fetch-categories")
 

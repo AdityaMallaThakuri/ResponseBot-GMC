@@ -1,8 +1,9 @@
 import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
@@ -15,6 +16,7 @@ from app.ingest.webhook import router as webhook_router
 from app.slack.app import create_slack_handler
 from app.slack.app import router as slack_router
 from app.slack.feedback import record_feedback
+from app.smartlead.watch import AttachJob
 
 log = logging.getLogger(__name__)
 
@@ -29,12 +31,45 @@ async def learning_loop(app: FastAPI, minutes: int) -> None:
             log.error("learning loop run failed: %s", type(exc).__name__)
 
 
+WEBHOOK_JOB_MINUTES = 60
+
+
+def slack_note_poster(settings: Any, slack: Any) -> Callable[[str], None]:
+    channel = settings.SLACK_ALERT_CHANNEL or settings.SLACK_DRAFT_CHANNEL
+
+    def post(text: str) -> None:
+        if not channel:
+            log.info("no Slack channel set; note not posted")
+            return
+        slack.chat_postMessage(channel=channel, text=text)
+
+    return post
+
+
+async def webhook_job_loop(app: FastAPI) -> None:
+    """Once at startup, then every 60 minutes: attach our webhook to newly watched campaigns."""
+    while True:
+        try:
+            settings = get_settings()
+            deps = get_deps(app)
+            job = getattr(app.state, "attach_job", None)
+            if job is None:
+                job = AttachJob(
+                    deps.smartlead, get_settings, slack_note_poster(settings, deps.slack)
+                )
+                app.state.attach_job = job
+            await run_in_threadpool(job.run_once)
+        except Exception as exc:  # noqa: BLE001 - keep looping; the next run tries again
+            log.error("webhook job run failed: %s", type(exc).__name__)
+        await asyncio.sleep(WEBHOOK_JOB_MINUTES * 60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()  # fail fast at startup if configuration is incomplete
     install_redaction()  # keep ?secret=... out of uvicorn's access log
-    if not settings.gmc_campaign_ids:
-        log.warning("GMC_CAMPAIGN_IDS is empty: every Smartlead webhook will be ignored")
+    if settings.gmc_campaign_ids:
+        log.warning("GMC_CAMPAIGN_IDS is set: only those campaigns are watched (testing override)")
     send_flag = settings.SEND_ENABLED or settings.LIVE_SEND_ALL
     if os.environ.get("RAILWAY_ENVIRONMENT") and send_flag:
         # Shadow mode: a deployed copy refuses to start if a send flag is on.
@@ -51,11 +86,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     task = None
     if settings.LEARN_INTERVAL_MINUTES > 0:
         task = asyncio.create_task(learning_loop(app, settings.LEARN_INTERVAL_MINUTES))
+    job_task = None
+    if settings.PUBLIC_BASE_URL.strip():
+        job_task = asyncio.create_task(webhook_job_loop(app))
+    else:
+        log.info("PUBLIC_BASE_URL is not set: the webhook attach job is off")
     yield
-    if task is not None:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+    for t in (task, job_task):
+        if t is not None:
+            t.cancel()
+            with suppress(asyncio.CancelledError):
+                await t
 
 
 app = FastAPI(title="AI Reply Bot", lifespan=lifespan)
