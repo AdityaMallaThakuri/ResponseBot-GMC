@@ -109,7 +109,7 @@ def test_0008_locks_down_both_new_tables_and_enables_rls() -> None:
 def test_templates_and_events_tables_were_not_added() -> None:
     errors, count = load_checker().check(ROOT)
     created = set(re.findall(r"create table if not exists (\w+)", sql()))
-    assert not created & {"templates", "events"} and len(created) == count == 14
+    assert not created & {"templates", "events"} and len(created) == count == 15
 
 
 def test_label_check_matches_claude_md_label_set() -> None:
@@ -126,6 +126,7 @@ def test_label_check_matches_claude_md_label_set() -> None:
         (client.MESSAGE_KEY, "messages_thread_direction_sent_at_message_id_key"),
         (client.DECISION_KEY, "decisions_draft_id_key"),
         (client.GOLD_LABEL_KEY, "gold_labels_thread_labeler_key"),
+        (client.ANNOUNCED_KEY, "announced_campaigns_campaign_kind_key"),
     ],
 )
 def test_idempotency_keys_match_sql_unique_constraints(
@@ -166,7 +167,7 @@ def test_no_secrets_columns() -> None:
 
 def test_repo_migrations_pass_the_checker() -> None:
     errors, count = load_checker().check(ROOT)
-    assert errors == [] and count == 14
+    assert errors == [] and count == 15
 
 
 # -- the checker itself ------------------------------------------------------------

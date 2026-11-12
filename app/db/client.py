@@ -37,6 +37,7 @@ MESSAGE_KEY = ("thread_id", "direction", "sent_at", "message_id")
 DECISION_KEY = ("draft_id",)
 GOLD_LABEL_KEY = ("thread_id", "labeler")
 EXAMPLE_KEY = ("source", "source_thread_id")
+ANNOUNCED_KEY = ("campaign_id", "kind")
 
 
 class DatabaseError(RuntimeError):
@@ -419,3 +420,15 @@ def fetch_proposed_drafts(db: Database, limit: int = 200) -> list[Row]:
         desc=True,
         limit=limit,
     )
+
+
+# -- announced_campaigns (which watched campaigns Slack has been told about) ---------
+
+
+def fetch_announced_campaign_ids(db: Database, kind: str) -> set[int]:
+    return {int(r["campaign_id"]) for r in _select(db, "announced_campaigns", {"kind": kind})}
+
+
+def record_announced_campaign(db: Database, kind: str, campaign_id: int, name: str) -> None:
+    row = {"campaign_id": campaign_id, "kind": kind, "campaign_name": name}
+    _insert_once(db, "announced_campaigns", row, ANNOUNCED_KEY)

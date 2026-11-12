@@ -56,11 +56,27 @@ def is_ours(hook: dict[str, Any], base_url: str) -> bool:
     return url.split("?")[0].rstrip("/") == f"{base_url.rstrip('/')}{PATH}"
 
 
+def cascade_ignore(campaigns: list[dict[str, Any]], ignore: frozenset[int]) -> frozenset[int]:
+    """The ignored ids plus every POS REPLY child of them, and their children, and so on."""
+    out = set(ignore)
+    changed = bool(out)
+    while changed:
+        changed = False
+        for c in campaigns:
+            cid, pid = int(c["id"]), parent_id(c)
+            if cid not in out and pid in out:
+                out.add(cid)
+                changed = True
+    return frozenset(out)
+
+
 def watched_campaigns(
     campaigns: list[dict[str, Any]],
     override: frozenset[int] = frozenset(),
     ignore: frozenset[int] = frozenset(),
 ) -> list[Watched]:
+    """Ignoring a campaign also ignores its children and their children."""
+    ignore = cascade_ignore(campaigns, ignore)
     by_id = {int(c["id"]): c for c in campaigns}
     if override:
         out = []
@@ -140,27 +156,76 @@ class AttachResult:
     would_attach: tuple[str, ...] = ()
     failed: int = 0
     skipped: str = ""  # why nothing was done at all
+    summary: str = ""  # the one Slack message of this run ("" when nothing changed)
+
+
+KIND_WATCHING = "watching"  # our webhook is on the campaign
+KIND_WOULD_WATCH = "would_watch"  # it would be attached, but AUTO_ATTACH_WEBHOOKS is off
+MAX_NAMES = 10
+
+
+def _campaigns(n: int) -> str:
+    return f"{n} campaign" if n == 1 else f"{n} campaigns"
+
+
+def summary_line(prefix: str, total: int, new: list[Watched], first_ever: bool) -> str:
+    """"Watching N campaigns. New: a, b, and X more." The first-ever run gives the total only."""
+    line = f"{prefix} {_campaigns(total)}"
+    if first_ever:
+        return f"{line}."
+    names = ", ".join(w.name for w in new[:MAX_NAMES])
+    more = len(new) - MAX_NAMES
+    tail = f", and {more} more" if more > 0 else ""
+    return f"{line}. New: {names}{tail}."
 
 
 class AttachJob:
-    """List campaigns, find watched ones without our webhook, attach it (if allowed)."""
+    """List campaigns, find watched ones without our webhook, attach it (if allowed).
+
+    Slack gets at most ONE message per run, and only when a watched campaign was not announced
+    before. Which campaigns were announced is stored (`announced`, `record`: the database), so a
+    restart or a redeploy does not repost. The first-ever run announces the total only.
+    """
 
     def __init__(
         self,
         client: Any,
         settings_provider: Callable[[], Any],
         post_note: Callable[[str], None],
+        announced: Callable[[str], set[int]],
+        record: Callable[[str, int, str], None],
     ) -> None:
         self._client = client
         self._settings = settings_provider
         self._post_note = post_note
-        self._announced: set[int] = set()  # one "would watch" note per campaign per process
+        self._announced = announced
+        self._record = record
 
-    def _note(self, text: str) -> None:
+    def _announce(self, groups: list[tuple[str, str, list[Watched]]]) -> str:
+        """Post one message for the groups that have something new. Returns the text posted."""
+        lines: list[str] = []
+        to_record: list[tuple[str, Watched]] = []
+        for kind, prefix, items in groups:
+            seen = self._announced(kind)
+            new = [w for w in items if w.id not in seen]
+            if not new:
+                continue
+            lines.append(summary_line(prefix, len(items), new, first_ever=not seen))
+            to_record.extend((kind, w) for w in new)
+        if not lines:
+            return ""
+        text = "\n".join(lines)
         try:
             self._post_note(text)
-        except Exception as exc:  # noqa: BLE001 - a Slack problem must not stop the job
+        except Exception as exc:  # noqa: BLE001 - not recorded, so the next run tries again
             logger.warning("webhook job: could not post to Slack: %s", type(exc).__name__)
+            return ""
+        for kind, w in to_record:
+            try:
+                self._record(kind, w.id, w.name)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("webhook job: could not record a campaign: %s", type(exc).__name__)
+        return text
 
     def run_once(self) -> AttachResult:
         settings = self._settings()
@@ -172,11 +237,13 @@ class AttachJob:
         watched = watched_campaigns(
             campaigns, settings.gmc_campaign_ids, settings.ignore_campaign_ids
         )
-        missing = [
+        have = [
             w
             for w in watched
-            if not any(is_ours(h, base) for h in self._client.list_campaign_webhooks(w.id))
+            if any(is_ours(h, base) for h in self._client.list_campaign_webhooks(w.id))
         ]
+        have_ids = {w.id for w in have}
+        missing = [w for w in watched if w.id not in have_ids]
         attach = settings.AUTO_ATTACH_WEBHOOKS
         logger.info(
             "webhook job: %d watched, %d without our webhook, auto attach %s",
@@ -184,17 +251,15 @@ class AttachJob:
             len(missing),
             "on" if attach else "off (report only)",
         )
+        watching = list(have)
+        would: list[Watched] = []
         attached: list[str] = []
-        would: list[str] = []
         failed = 0
         url = webhook_url(base, settings.WEBHOOK_SECRET)
         for w in missing:
             if not attach:
-                would.append(w.name)
+                would.append(w)
                 logger.info("webhook job: would attach to %s (%d)", w.name, w.id)
-                if w.id not in self._announced:
-                    self._announced.add(w.id)
-                    self._note(f"Would start watching (AUTO_ATTACH_WEBHOOKS is off): {w.name}")
                 continue
             try:
                 self._client.create_campaign_webhook(w.id, WEBHOOK_NAME, url)
@@ -203,6 +268,12 @@ class AttachJob:
                 logger.error("webhook job: could not attach to %d: %s", w.id, type(exc).__name__)
                 continue
             attached.append(w.name)
+            watching.append(w)
             logger.info("webhook job: attached to %s (%d)", w.name, w.id)
-            self._note(f"Now watching: {w.name}")
-        return AttachResult(tuple(attached), tuple(would), failed)
+        text = self._announce(
+            [
+                (KIND_WATCHING, "Watching", watching),
+                (KIND_WOULD_WATCH, "Would watch (AUTO_ATTACH_WEBHOOKS is off):", would),
+            ]
+        )
+        return AttachResult(tuple(attached), tuple(w.name for w in would), failed, summary=text)

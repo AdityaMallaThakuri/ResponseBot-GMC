@@ -44,7 +44,7 @@ ngrok http --domain=<DOMAIN> 8000
 Check: `Invoke-RestMethod https://<DOMAIN>/health` prints `status ok`. In the Slack app settings set
 Interactivity Request URL to `https://<DOMAIN>/slack/events` (Good draft / Bad draft buttons).
 
-## b) Migrations 0009 to 0011 and the example library
+## b) Migrations 0009 to 0012 and the example library
 
 Apply the files in the Supabase SQL editor, in this order (0001 to 0008 first if that project lacks
 them; see `docs/apply_migrations.md`):
@@ -52,6 +52,7 @@ them; see `docs/apply_migrations.md`):
 1. `db/migrations/0009_actions_would_suppress.sql`
 2. `db/migrations/0010_drafts_model_validator.sql`
 3. `db/migrations/0011_reply_examples_feedback.sql`
+4. `db/migrations/0012_announced_campaigns.sql`
 
 Check: `select count(*) from reply_examples;` returns 0 with no error. Then in window B or a third
 window:
@@ -116,7 +117,7 @@ example library is empty or the label's confidence was low: check step b.
    Only that campaign is watched, so the job can attach to nothing else.
 3. Stop the server in window A (Ctrl+C) and start it again. It runs the webhook job once at
    startup. In the log expect `webhook job: 1 watched, 1 without our webhook, auto attach on` then
-   `webhook job: attached to <name>`, and a Slack note `Now watching: <name>`. The job also runs
+   `webhook job: attached to <name>`, and ONE Slack summary (the first-ever run posts only a total: "Watching 1 campaign."; later runs add "New: <names>" only when something is new). The job also runs
    every 60 minutes while the server is up; it will skip a campaign that already has our webhook.
 4. Check in Smartlead (campaign settings, webhooks) that one `Reply Bot (EMAIL_REPLY)` webhook
    exists. Or re-run `attach_webhooks.py --base-url https://<DOMAIN>`: it now says "webhook already

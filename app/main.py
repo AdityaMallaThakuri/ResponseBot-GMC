@@ -9,12 +9,14 @@ from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
 
 from app.config.settings import get_settings
+from app.db.client import fetch_announced_campaign_ids, record_announced_campaign
 from app.examples.learn import learn_once
 from app.ingest.log_redact import install_redaction
 from app.ingest.webhook import get_deps
 from app.ingest.webhook import router as webhook_router
 from app.slack.app import create_slack_handler
 from app.slack.app import router as slack_router
+from app.slack.card import escape_mrkdwn
 from app.slack.feedback import record_feedback
 from app.smartlead.watch import AttachJob
 
@@ -41,22 +43,31 @@ def slack_note_poster(settings: Any, slack: Any) -> Callable[[str], None]:
         if not channel:
             log.info("no Slack channel set; note not posted")
             return
-        slack.chat_postMessage(channel=channel, text=text)
+        slack.chat_postMessage(channel=channel, text=escape_mrkdwn(text))
 
     return post
+
+
+def build_attach_job(app: FastAPI) -> AttachJob:
+    settings = get_settings()
+    deps = get_deps(app)
+    db = deps.db
+    return AttachJob(
+        deps.smartlead,
+        get_settings,
+        slack_note_poster(settings, deps.slack),
+        lambda kind: fetch_announced_campaign_ids(db, kind),
+        lambda kind, cid, name: record_announced_campaign(db, kind, cid, name),
+    )
 
 
 async def webhook_job_loop(app: FastAPI) -> None:
     """Once at startup, then every 60 minutes: attach our webhook to newly watched campaigns."""
     while True:
         try:
-            settings = get_settings()
-            deps = get_deps(app)
             job = getattr(app.state, "attach_job", None)
             if job is None:
-                job = AttachJob(
-                    deps.smartlead, get_settings, slack_note_poster(settings, deps.slack)
-                )
+                job = build_attach_job(app)
                 app.state.attach_job = job
             await run_in_threadpool(job.run_once)
         except Exception as exc:  # noqa: BLE001 - keep looping; the next run tries again

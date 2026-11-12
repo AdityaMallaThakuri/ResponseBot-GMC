@@ -58,11 +58,13 @@ order. Then apply, in this order, in the Supabase SQL editor (paste each file, R
 1. `db/migrations/0009_actions_would_suppress.sql`
 2. `db/migrations/0010_drafts_model_validator.sql`
 3. `db/migrations/0011_reply_examples_feedback.sql`
+4. `db/migrations/0012_announced_campaigns.sql` (the webhook job's Slack summaries use it)
 
 Confirm (SQL editor):
 
 ```sql
 select count(*) from reply_examples;                      -- 0 before loading, no error
+select count(*) from announced_campaigns;                 -- 0, no error
 select column_name from information_schema.columns
  where table_name = 'drafts' and column_name in ('model','validator_result','feedback');  -- 3 rows
 select pg_get_constraintdef(oid) from pg_constraint

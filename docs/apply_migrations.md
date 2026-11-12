@@ -1,7 +1,7 @@
 # Applying the database migrations
 
 The migrations in `db/migrations/` are plain Postgres (15+) and work on Supabase. Nothing applies
-them automatically: you run them by hand, in numeric order. They create 14 tables, so apply them
+them automatically: you run them by hand, in numeric order. They create 15 tables, so apply them
 to a scratch project first and check them before your real one.
 
 | File | Creates |
@@ -17,6 +17,7 @@ to a scratch project first and check them before your real one.
 | `0009_actions_would_suppress.sql` | no new table; lets `actions.type` hold `would_suppress` (needed from step C2) |
 | `0010_drafts_model_validator.sql` | no new table; adds `drafts.model` and `drafts.validator_result` (needed from step C3) |
 | `0011_reply_examples_feedback.sql` | adds the `reply_examples` table (the example library) and `drafts.feedback`, `feedback_by`, `feedback_at` |
+| `0012_announced_campaigns.sql` | adds `announced_campaigns` (which watched campaigns Slack was told about; needed before the webhook job runs) |
 
 Every file uses `create ... if not exists` or `add column if not exists`, so re-running one is
 harmless. Never edit an applied file: to change a table later, add the next numbered file. A migration that
@@ -32,14 +33,14 @@ creates a table must also enable row level security and revoke `anon` / `authent
    ```
    .venv/Scripts/python scripts/check_schema.py
    ```
-   Expect `OK: 14 tables, every migration parses, RLS on, tables match CLAUDE.md`.
+   Expect `OK: 15 tables, every migration parses, RLS on, tables match CLAUDE.md`.
 2. Use a scratch Supabase project (or a Supabase branch) for the first run.
 3. Do not put the database password in `.env` or commit it. If you use `psql` (option B), keep the
    connection string in your shell only.
 
 ## Option A: Supabase SQL Editor (no tools to install)
 
-For each file, in order `0001` to `0011`:
+For each file, in order `0001` to `0012`:
 
 1. Open the project in the Supabase dashboard, then **SQL Editor** > **New query**.
 2. Paste the whole file and press **Run**.
@@ -238,7 +239,7 @@ end $$;
 
 - The app reaches these tables only with the **service key** (`SUPABASE_SERVICE_KEY`), which
   bypasses row level security. The anon and authenticated keys can read and write nothing.
-- Nothing records which files you applied. Note it somewhere, for example "applied 0001 to 0011 to
+- Nothing records which files you applied. Note it somewhere, for example "applied 0001 to 0012 to
   <project> on <date>", so the next migration starts at the right number.
 
 ## Undoing a mistake
