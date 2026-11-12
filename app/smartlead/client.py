@@ -198,7 +198,7 @@ class SmartleadClient:
         )
 
     def get_sequence(self, campaign_id: int) -> Any:
-        """The campaign's sequence steps (read only). Plural route, verified live; singular is 404."""
+        """The campaign's sequence steps (read only). Plural route, verified live."""
         return self._request("GET", f"/campaigns/{campaign_id}/sequences")
 
     def list_campaigns(self) -> list[dict[str, Any]]:
