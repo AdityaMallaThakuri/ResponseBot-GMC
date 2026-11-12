@@ -3,7 +3,8 @@
 Usage:
     python scripts/attach_webhooks.py --base-url https://YOUR-APP.up.railway.app
         Read only. Prints the GMC campaigns and their POS REPLY children (found by
-        parent_campaign_id, shown with the parent's name), which already have our webhook, and the GMC_CAMPAIGN_IDS value to set. Changes nothing.
+        parent_campaign_id, shown with the parent's name), which already have our webhook,
+        and the GMC_CAMPAIGN_IDS value to set. Changes nothing.
     python scripts/attach_webhooks.py --base-url ... --apply
         Creates our webhook on each campaign that lacks it, after you typed the count to confirm.
 
