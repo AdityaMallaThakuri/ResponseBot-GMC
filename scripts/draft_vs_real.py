@@ -87,7 +87,7 @@ def block(i: int, r: dict[str, Any]) -> str:
             f"- Thread: {r['thread_id']}  |  label: {r['gold']}  |  "
             f"**similarity {r['score']:.1f}**  |  closest example unchanged: {r['baseline']:.1f}",
             f"- Examples used: {', '.join(r['example_ids'])}",
-            f"- Figures in our draft: {figures}",
+            f"- Figures in our draft: {figures}  |  sentences removed for a figure: {r['removed']}",
             "",
             "**Prospect reply**",
             "",
@@ -122,6 +122,8 @@ def summary(results: list[dict[str, Any]], failed: list[str]) -> list[str]:
         f"Yardstick, the closest example sent unchanged: average {statistics.mean(base):.1f}",
         f"Drafts with a number, price or percentage to check: "
         f"{sum(1 for r in results if r['flagged'])}",
+        f"Sentences removed for a number that is not allowed: "
+        f"{sum(r['removed'] for r in results)} in {sum(1 for r in results if r['removed'])} drafts",
     ]
     by_label: dict[str, list[float]] = {}
     for r in results:
@@ -210,6 +212,7 @@ def main() -> None:
                 "score": similarity(outcome.text, real),
                 "baseline": similarity(closest[0].gamic_reply, real) if closest else 0.0,
                 "flagged": outcome.flagged,
+                "removed": outcome.removed,
                 "example_ids": outcome.example_ids,
             }
         )

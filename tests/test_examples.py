@@ -12,13 +12,15 @@ import pytest
 from app.db.client import fetch_examples_for_label, insert_example
 from app.db.records import ExampleSource, NewExample
 from app.examples.drafter import (
+    NO_NUMBERS_RULE,
     ExampleDrafter,
     build_user_message,
     clean_draft,
     flag_figures,
+    price_wording,
 )
 from app.examples.history import history_examples, label_map
-from app.examples.learn import learn_once, sent_after_first_reply
+from app.examples.learn import learn_once, matches_step, sent_after_first_reply, step_texts
 from app.examples.library import (
     Example,
     campaign_family,
@@ -127,7 +129,7 @@ def new_example(thread_id: str = "t1", label: str = "info_request", **kw: Any) -
         source_thread_id=thread_id,
         label=label,
         prospect_reply="q",
-        gamic_reply="a",
+        gamic_reply=kw.pop("gamic_reply", "a"),
         campaign_name="GMC - M&A",
         replied_at=T0,
         **kw,
@@ -211,9 +213,84 @@ def test_the_draft_uses_the_examples_and_never_keeps_a_link() -> None:
     assert "[TIME OPTIONS]" in system and "[LINK]" in system and "Add no new facts" in system
 
 
-def test_figures_left_in_the_draft_are_flagged() -> None:
-    out = draft_with(drafter(reply_with("We charge 5% plus $10k.")))
-    assert out.flagged == ("5%", "$10k")
+PRICE_REPLY = "Pricing is typically $2,000 to $4,000 per month for most firms."
+
+
+def price_pool() -> list[Example]:
+    def p(n: int, label: str, text: str, days: int) -> Example:
+        return Example(
+            "history", f"p{n}", "GMC - M&A", label, "how much?", text, T0 + timedelta(days=days)
+        )
+
+    return [
+        p(1, "price_question", "Old: it is $9,000 per month.", 1),
+        p(2, "price_question", PRICE_REPLY + " Happy to talk.", 30),
+        p(3, "price_and_info", "We charge a 15% success fee. More info soon.", 20),
+        p(4, "price_question", "Another one at $3,000 monthly.", 25),
+        p(5, "price_question", "No figure here at all.", 40),
+    ]
+
+
+def test_price_wording_is_the_figure_sentences_of_the_3_most_recent_price_replies() -> None:
+    wording = price_wording(price_pool())
+    assert wording == [
+        PRICE_REPLY,
+        "Another one at $3,000 monthly.",
+        "We charge a 15% success fee.",
+    ]
+    assert not any("9,000" in w for w in wording)  # the 4th newest is not used
+    assert (
+        price_wording(price_pool(), exclude_thread_id="p2")[0] == "Another one at $3,000 monthly."
+    )
+
+
+def test_other_labels_are_told_no_numbers_and_a_figure_sentence_is_removed() -> None:
+    text = "Hey Pat, happy to help.\nWe get 40% reply rates. Want a call?\nBest,\nAryan"
+    model = reply_with(text)
+    out = draft_with(drafter(model))
+    assert out.kind == "drafted" and out.removed == 1 and out.flagged == ()
+    assert "40%" not in out.text and "Want a call?" in out.text and "happy to help" in out.text
+    user = model.calls[0]["messages"][0]["content"]
+    assert NO_NUMBERS_RULE in user and "price wording" not in user.lower()
+
+
+def test_a_number_the_lead_wrote_is_allowed_in_any_draft() -> None:
+    out = draft_with(
+        drafter(reply_with("Yes, 50 targets is fine. Want a call?")),
+        reply="Can you send 50 targets?",
+    )
+    assert out.removed == 0 and out.flagged == ("50",)
+    gone = draft_with(drafter(reply_with("Yes, 70 targets is fine.")), reply="Can you send 50?")
+    assert gone.kind == "no_draft"  # the only sentence had a number that is not allowed
+
+
+def test_clock_times_are_never_allowed() -> None:
+    out = draft_with(
+        drafter(reply_with("Does 10am work? Or [TIME OPTIONS].")), reply="call at 10am?"
+    )
+    assert "10am" not in out.text and "[TIME OPTIONS]" in out.text and out.removed == 1
+
+
+def test_price_replies_get_the_recent_price_wording_and_may_state_that_range() -> None:
+    model = reply_with("Hey Pat. Pricing is typically $2,000 to $4,000 per month for most firms.")
+    out = draft_with(drafter(model, pool=price_pool()), label="price_question")
+    user = model.calls[0]["messages"][0]["content"]
+    rule = user.split("<number_rule>")[1].split("</number_rule>")[0]
+    assert "$2,000 to $4,000 per month" in rule and "$9,000" not in rule
+    assert out.removed == 0 and "$2,000" in out.flagged[0]
+
+
+def test_a_price_not_in_the_examples_is_removed_even_for_price_labels() -> None:
+    model = reply_with("Hey Pat.\nIt costs $500 a month.\nHappy to chat.")
+    out = draft_with(drafter(model, pool=price_pool()), label="price_and_info")
+    assert "$500" not in out.text and out.removed == 1 and "Happy to chat." in out.text
+
+
+def test_without_any_price_wording_the_model_is_told_not_to_state_one() -> None:
+    model = reply_with("Hey Pat, pricing depends on scope.")
+    pool = [Example("history", "x", "GMC - M&A", "price_question", "q", "No figure here.", T0)]
+    draft_with(drafter(model, pool=pool), label="price_question")
+    assert "No price wording is available" in model.calls[0]["messages"][0]["content"]
 
 
 def test_no_draft_below_confidence_without_examples_on_error_or_empty_answer() -> None:
@@ -249,7 +326,7 @@ def make_deps(model: FakeModel | None = None, label: str = "info_request", conf:
         slack=FakeSlack(),
         example_drafter=ExampleDrafter(
             lambda lab: load_pool(db, lab),
-            model or reply_with("Hey Pat, here is how it works. 3 steps."),
+            model or reply_with("Hey Pat, here is how it works in two steps."),
             "m-x",
         ),
         config=IngestConfig(draft_channel="drafts", draft_min_confidence=0.75),
@@ -272,13 +349,34 @@ def test_a_new_reply_gets_an_example_draft_on_a_copy_card() -> None:
     (draft,) = rows(deps.db, "drafts")
     assert draft["template_id"] == "examples" and draft["status"] == "proposed"
     assert draft["slots"] == {"example_ids": ["h1"]} and draft["model"] == "m-x"
-    assert draft["validator_result"]["flagged"] == ["3"]
+    assert draft["validator_result"]["flagged"] == []
     (post,) = deps.slack.posts
     text = json.dumps(post["blocks"])
-    assert "Here is how it works" not in text and "here is how it works. 3 steps." in text
-    assert "```" in text and "Check these figures before you send" in text and "`3`" in text
+    assert "here is how it works in two steps." in text and "```" in text
     assert actions(post) == ["draft_good", "draft_bad"]
     assert rows(deps.db, "slack_cards")[0]["lane"] == "draft"
+
+
+def test_a_removed_figure_sentence_is_noted_on_the_card() -> None:
+    deps = make_deps(reply_with("Hey Pat, here is how it works.\nWe see 40% reply rates."))
+    run(deps)
+    (draft,) = rows(deps.db, "drafts")
+    assert "40%" not in draft["text"] and draft["validator_result"]["removed_sentences"] == 1
+    text = json.dumps(deps.slack.posts[0]["blocks"])
+    assert "Removed 1 sentence(s) with a number, price or percentage" in text
+
+
+def test_a_price_from_the_library_is_stated_and_highlighted_on_the_card() -> None:
+    deps = make_deps(reply_with("Hey Pat. Typically $3,000 per month."), label="price_question")
+    insert_example(
+        deps.db,
+        new_example("pq", "price_question", gamic_reply="It is typically $3,000 per month."),
+    )
+    run(deps)
+    (draft,) = rows(deps.db, "drafts")
+    assert draft["validator_result"]["flagged"] == ["$3,000"]
+    text = json.dumps(deps.slack.posts[0]["blocks"])
+    assert "Check these figures before you send" in text and "`$3,000`" in text
 
 
 def test_the_draft_card_never_has_approve_edit_or_skip() -> None:
@@ -398,7 +496,7 @@ def test_a_feedback_click_replaces_the_buttons_with_who_said_what() -> None:
 
 
 def with_later_send(
-    deps: IngestDeps, body: str = "<p>Hi Pat, here is how it works, 3 steps.</p>"
+    deps: IngestDeps, body: str = "<p>Hi Pat, here is how it works in two steps.</p>"
 ) -> None:
     history = copy.deepcopy(HISTORY)
     history["history"][-1]["email_body"] = body
@@ -411,9 +509,11 @@ def test_sent_after_first_reply_finds_the_next_sent_message() -> None:
     found = sent_after_first_reply(parse_thread(HISTORY))
     assert found is not None and found[0].direction.value == "REPLY"
     assert found[1].direction.value == "SENT" and found[1].timestamp > found[0].timestamp
+    assert found[2] == 0
     only_first = copy.deepcopy(HISTORY)
     only_first["history"] = only_first["history"][:2]
-    assert sent_after_first_reply(parse_thread(only_first)) is None
+    (_, none, skipped) = sent_after_first_reply(parse_thread(only_first))
+    assert none is None and skipped == 0
 
 
 def test_a_reply_ray_sent_becomes_a_new_example_with_a_similarity_score() -> None:
@@ -487,6 +587,99 @@ def test_the_learning_loop_only_reads_from_smartlead() -> None:
     run(deps)
     with_later_send(deps)
     deps.smartlead = SimpleNamespace(
-        get_thread_raw=deps.smartlead.get_thread_raw, thread_calls=deps.smartlead.thread_calls
+        get_thread_raw=deps.smartlead.get_thread_raw,
+        get_sequence=deps.smartlead.get_sequence,
+        thread_calls=deps.smartlead.thread_calls,
     )  # nothing but a read method exists, so any other call would raise
     assert learn_once(deps, now=NOW).learned == 1
+
+
+# ---- sequence steps are not Ray's answer
+
+
+STEP_HTML = HISTORY["history"][-1]["email_body"]
+SEQUENCE = [{"seq_number": 2, "email_body": STEP_HTML.replace("Jane", "{{first_name}}")}]
+
+
+def test_step_texts_reads_bodies_and_variants_and_drops_merge_tags_and_spintax() -> None:
+    sequence = [
+        {
+            "seq_number": 1,
+            "email_body": "<p>{{first_name}} - {saw|noticed} your firm</p>",
+            "sequence_variants": [{"variant_label": "B", "email_body": "<p>Variant text here</p>"}],
+        }
+    ]
+    steps = step_texts(sequence)
+    assert len(steps) == 2 and "saw your firm" in steps[0] and "Variant text here" in steps[1]
+    assert step_texts([]) == [] and step_texts(None) == []
+
+
+def test_a_sent_message_that_matches_a_step_is_not_an_answer() -> None:
+    from app.smartlead.thread import parse_thread
+
+    steps = step_texts(SEQUENCE)
+    assert matches_step(parse_thread(HISTORY)[-1].text, steps)
+    reply, answer, skipped = sent_after_first_reply(parse_thread(HISTORY), steps)
+    assert answer is None and skipped == 1 and reply.direction.value == "REPLY"
+
+
+def test_the_first_sent_message_that_is_not_a_step_is_the_answer() -> None:
+    from app.smartlead.thread import parse_thread
+
+    history = copy.deepcopy(HISTORY)
+    ray = copy.deepcopy(history["history"][-1])
+    ray.update(
+        {"email_body": "<p>Hi Pat, here is how it works in two steps.</p>", "message_id": "<ray@x>"}
+    )
+    ray["time"] = "2026-10-22T09:00:00.000Z"
+    ray["stats_id"] = "33333333-cccc-4ccc-8ccc-000000000003"
+    history["history"].append(ray)
+    _, answer, skipped = sent_after_first_reply(parse_thread(history), step_texts(SEQUENCE))
+    assert skipped == 1 and "two steps" in answer.text
+
+
+def test_the_learning_loop_skips_sequence_steps_logs_the_count_and_waits(caplog) -> None:
+    import logging
+
+    deps = make_deps()
+    run(deps)
+    deps.smartlead.sequence = SEQUENCE
+    with caplog.at_level(logging.INFO, logger="app.examples.learn"):
+        result = learn_once(deps, now=NOW)
+    assert (result.learned, result.waiting, result.skipped_steps) == (0, 1, 1)
+    assert not [r for r in rows(deps.db, "reply_examples") if r["source"] == "ray_sent"]
+    assert "1 sent messages skipped as sequence steps" in caplog.text
+    assert deps.smartlead.sequence_calls == [deps.smartlead.sequence_calls[0]] * len(
+        deps.smartlead.sequence_calls
+    )
+
+
+def test_an_answer_after_a_sequence_step_is_learned_and_the_step_is_counted() -> None:
+    deps = make_deps()
+    run(deps)
+    deps.smartlead.sequence = SEQUENCE
+    history = copy.deepcopy(HISTORY)
+    ray = copy.deepcopy(history["history"][-1])
+    ray.update({"email_body": "<p>Hi Pat, here is how it works in two steps.</p>"})
+    ray.update({"time": "2026-10-22T09:00:00.000Z", "message_id": "<ray@x>", "stats_id": "s-ray"})
+    history["history"].append(ray)
+    deps.smartlead.history = history
+    result = learn_once(deps, now=NOW)
+    assert (result.learned, result.skipped_steps) == (1, 1)
+    (example,) = [r for r in rows(deps.db, "reply_examples") if r["source"] == "ray_sent"]
+    assert "two steps" in example["gamic_reply"]
+
+
+def test_if_the_sequence_cannot_be_read_nothing_is_guessed() -> None:
+    from app.smartlead.errors import SmartleadError
+
+    deps = make_deps()
+    run(deps)
+
+    def broken(campaign_id: int):
+        raise SmartleadError("sequence down")
+
+    deps.smartlead.get_sequence = broken
+    result = learn_once(deps, now=NOW)
+    assert (result.errors, result.learned) == (1, 0)
+    assert not [r for r in rows(deps.db, "reply_examples") if r["source"] == "ray_sent"]

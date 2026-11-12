@@ -197,6 +197,10 @@ class SmartleadClient:
             to_email=lead.email,
         )
 
+    def get_sequence(self, campaign_id: int) -> Any:
+        """The campaign's sequence steps (read only). The route is UNVERIFIED against live data."""
+        return self._request("GET", f"/campaigns/{campaign_id}/sequence")
+
     def get_lead_categories(self) -> Any:
         return self._request("GET", "/leads/fetch-categories")
 

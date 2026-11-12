@@ -58,8 +58,16 @@ def view_from_row(row: Row) -> tuple[Route | None, DraftView]:
     edited = bool(row.get("human_edited"))
     text = row.get("final_text") or row["text"]
     notes = notes_for(blockers, warnings)
-    if row["template_id"] == EXAMPLES_TEMPLATE_ID and placeholders(text):
-        notes = (*notes, "Fill in " + ", ".join(placeholders(text)) + " before you send.")
+    if row["template_id"] == EXAMPLES_TEMPLATE_ID:
+        if placeholders(text):
+            notes = (*notes, "Fill in " + ", ".join(placeholders(text)) + " before you send.")
+        removed = int(result.get("removed_sentences") or 0)
+        if removed:
+            notes = (
+                *notes,
+                f"Removed {removed} sentence(s) with a number, price or percentage that is "
+                "not allowed in this reply.",
+            )
     return None, DraftView(
         text,
         row["template_id"],
@@ -112,6 +120,7 @@ def _prepare_from_examples(
                 "approve_blockers": [],
                 "warnings": [],
                 "flagged": list(outcome.flagged),
+                "removed_sentences": outcome.removed,
             },
         ),
     )

@@ -294,9 +294,7 @@ def test_retry_queue_due_and_failure_flow() -> None:
     )
     client.enqueue_retry(
         db,
-        NewRetry(
-            kind=RetryKind.CLASSIFY, payload={}, next_attempt_at=T0 + timedelta(hours=1)
-        ),
+        NewRetry(kind=RetryKind.CLASSIFY, payload={}, next_attempt_at=T0 + timedelta(hours=1)),
     )
     for row in db.tables["retry_queue"]:
         row["status"] = "pending"

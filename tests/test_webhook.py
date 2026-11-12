@@ -50,12 +50,18 @@ class FakeSmartlead:
         self.thread_calls: list[Any] = []
         self.lookups: list[tuple[int, str]] = []
         self.error: Exception | None = None
+        self.sequence: Any = []
+        self.sequence_calls: list[int] = []
 
     def get_thread_raw(self, lead: Any) -> Any:
         self.thread_calls.append(lead)
         if self.error:
             raise self.error
         return self.history
+
+    def get_sequence(self, campaign_id: int) -> Any:
+        self.sequence_calls.append(campaign_id)
+        return self.sequence
 
     def find_inbox_item(self, campaign_id: int, email: str) -> Any:
         self.lookups.append((campaign_id, email))

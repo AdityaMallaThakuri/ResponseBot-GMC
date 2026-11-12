@@ -69,7 +69,7 @@ def test_absent_required_variable_is_still_reported_as_missing(
     assert problem_lines(exc.value) == [f"- {name}: missing"]
 
 
-@pytest.mark.parametrize("blank", ['', '"   "'])
+@pytest.mark.parametrize("blank", ["", '"   "'])
 @pytest.mark.parametrize("name", REQUIRED)
 def test_blank_required_variable_in_dotenv_is_rejected(
     isolated: pytest.MonkeyPatch, tmp_path: Path, name: str, blank: str
