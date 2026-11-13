@@ -146,14 +146,65 @@ _GREETING = re.compile(
 )
 
 
+_BARE_NAME = re.compile(r"^(\s*)([A-Z][a-z'’-]+)(\s*,)")
+_NOT_NAMES = frozenset(
+    [
+        "sure",
+        "great",
+        "thanks",
+        "thank",
+        "perfect",
+        "absolutely",
+        "sounds",
+        "yes",
+        "ok",
+        "okay",
+        "totally",
+        "awesome",
+        "happy",
+        "understood",
+        "definitely",
+        "certainly",
+        "no",
+        "hi",
+        "hey",
+        "hello",
+        "dear",
+        "good",
+        "got",
+        "of",
+    ]
+)
+
+
+def fill_name(text: str, first_name: str) -> str:
+    """The [NAME] marker of an SOP template becomes the lead's first name; with no name known the
+    marker is dropped ("Hey [NAME]," becomes "Hey,")."""
+    name = first_name.strip()
+    if name:
+        return text.replace("[NAME]", name)
+    return re.sub(r"[ \t]*\[NAME\]", "", text)
+
+
 def adapt_example(reply: str, first_name: str) -> str:
-    """An example reply for a new lead: only the first name in the greeting changes."""
+    """An example reply for a new lead: only the first name in the greeting changes.
+
+    A greeting is "Hey/Hi/Hello/Dear Name" or a bare "Name," opening (so a name from the example
+    never reaches the new lead); the [NAME] marker of an SOP template is filled."""
     name = first_name.strip()
 
     def swap(m: re.Match[str]) -> str:
         return f"{m.group(1)} {name}{m.group(2)}" if name else f"{m.group(1)}{m.group(2)}"
 
-    return _GREETING.sub(swap, reply.strip(), count=1)
+    text = reply.strip()
+    greeted = _GREETING.sub(swap, text, count=1)
+    if greeted == text:
+        bare = _BARE_NAME.match(text)
+        if bare and bare.group(2).lower() not in _NOT_NAMES:
+            text = (f"{name}{bare.group(3)}" if name else "Hi,") + text[bare.end() :]
+    else:
+        text = greeted
+    return fill_name(text, first_name)
 
 
 def flag_figures(text: str) -> tuple[str, ...]:
@@ -171,6 +222,19 @@ def norm_figure(figure: str) -> str:
 def _sentences(text: str) -> list[str]:
     pieces = (piece for line in text.split("\n") for piece in _SENTENCE_END.split(line))
     return [piece.strip() for piece in pieces if piece.strip()]
+
+
+_MONEY = re.compile(r"[$£€]|%|\bpercent\b|\b\d[\d,.]*\s?[km]\b", re.IGNORECASE)
+
+
+def is_price_sentence(sentence: str) -> bool:
+    """A sentence that states a price: a money or percent figure, and not a scheduling line."""
+    return bool(
+        _MONEY.search(sentence)
+        and not _CLOCK.search(sentence)
+        and not _DAY_RUN.search(sentence)
+        and TIME_PLACEHOLDER not in sentence
+    )
 
 
 def price_wording(
@@ -192,7 +256,7 @@ def price_wording(
     wording: list[str] = []
     for example in price_replies:
         for sentence in _sentences(example.gamic_reply):
-            if flag_figures(sentence) and sentence not in wording:
+            if is_price_sentence(sentence) and sentence not in wording:
                 wording.append(sentence)
     return wording
 
@@ -520,7 +584,7 @@ class ExampleDrafter:
                 text = insert_price_sentence(text, "")
             else:
                 text = insert_price_sentence(text, sentence)  # sentence is '' otherwise
-            return fill_links(text, label, vertical, self.links), removed
+            return fill_links(fill_name(text, first_name), label, vertical, self.links), removed
 
         try:
             text, removed = finish(self._ask(user))

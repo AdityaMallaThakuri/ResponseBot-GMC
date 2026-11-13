@@ -237,3 +237,38 @@ def test_the_matching_prompt_lists_we_already_do_this_as_the_broker_network_situ
 def test_a_question_the_templates_do_not_answer_still_goes_to_ray() -> None:
     out = draft(make(model(match=0)), "objection_info", reply=SEC_REPLY)
     assert (out.kind, out.reason) == ("no_draft", OBJECTION_NO_DRAFT)
+
+
+def test_the_name_marker_is_filled_or_dropped() -> None:
+    from app.examples.drafter import adapt_example, fill_name
+
+    assert fill_name("Hey [NAME],\n\nSure.", "Paul") == "Hey Paul,\n\nSure."
+    assert fill_name("Hey [NAME],\n\nSure.", "") == "Hey,\n\nSure."
+    assert adapt_example("Hey [NAME],\n\nSure.", "Paul") == "Hey Paul,\n\nSure."
+
+
+def test_a_name_from_an_example_never_reaches_the_new_lead() -> None:
+    from app.examples.drafter import adapt_example
+
+    old = "Richard, I've sent over an invite. Speak soon."
+    assert adapt_example(old, "Hunter").startswith("Hunter, I've sent")
+    assert adapt_example(old, "").startswith("Hi, I've sent")
+    assert adapt_example("Sure, happy to talk.", "Hunter") == "Sure, happy to talk."
+    assert adapt_example("Hey Richard, thanks.", "Hunter") == "Hey Hunter, thanks."
+
+
+def test_a_library_price_sentence_is_a_price_never_a_scheduling_line() -> None:
+    from app.examples.drafter import is_price_sentence, latest_price_sentence
+
+    assert not is_price_sentence("Would tomorrow or monday at 10:30am or 1pm CST work?")
+    assert not is_price_sentence("I'd need 15-20 minutes to get your deal box.")
+    assert is_price_sentence("It is a flat fee of $2.5k-$10k.")
+    assert is_price_sentence("We take 10-20% of the advisory fee.")
+    pool = [
+        hist(
+            1,
+            "price_question",
+            "Hey.\n\nWould tomorrow or monday at 10:30am work?\n\nIt is a flat fee of $3k.",
+        )
+    ]
+    assert latest_price_sentence(pool) == "It is a flat fee of $3k."
