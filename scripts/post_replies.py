@@ -11,8 +11,9 @@ Default campaigns: the watched campaigns whose status is ACTIVE. Default date: y
 It does what the webhook would do for each thread whose FIRST prospect reply came on that day:
 store the thread and messages, classify, draft, and post the card (draft cards with Good draft /
 Bad draft, notices without buttons) to SLACK_DRAFT_CHANNEL (notices to SLACK_ALERT_CHANNEL if
-set). Like the live app it skips a thread that already has a card, and a thread whose first reply was on an
-earlier day (that day's reply is a follow-up, which the app stores but never classifies).
+set). Like the live app it skips a thread that already has a card, and a thread whose first
+reply was on an earlier day (that day's reply is a follow-up, which the app stores but never
+classifies).
 
 For this script only, a card also shows "What we actually sent:" (first 600 characters) when we
 already answered the lead after their reply with something that is not a sequence step.
