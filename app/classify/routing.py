@@ -6,8 +6,7 @@ Lanes shown on the Slack card:
   called.
 - human_only: a notice for a person, no draft. Low confidence, a classifier error,
   not_interested (with "suggest: close" at or above its own threshold), out_of_office,
-  wrong_person, auto_reply_or_bounce, off_script, objection_info and objection_price (Ray
-  writes those himself).
+  wrong_person, auto_reply_or_bounce and off_script.
 - draft: every other label. The card shows a draft written from past examples in a copy-friendly
   block, with Good draft / Bad draft buttons that only record feedback. A person copies the draft
   and sends it from Smartlead: the bot sends nothing.
@@ -32,13 +31,12 @@ NOTICE_ONLY_LABELS = frozenset(
         "wrong_person",
         "auto_reply_or_bounce",
         "off_script",
-        "objection_info",
-        "objection_price",
     }
 )
 
 
-# Objections are never drafted: the lead's reply is on the card and Ray writes the answer.
+# Objections are drafted only for M&A campaigns, and only when an SOP objection template clearly
+# matches (app/examples/drafter.py). Otherwise the card shows the lead's reply and this note.
 OBJECTION_NOTE = "Objection: Ray to write this one"
 
 # A short note on the card for replies that need no answer at all, or that a person answers.

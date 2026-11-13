@@ -33,7 +33,7 @@ Settings (not secret):
 | `SLACK_DRAFT_CHANNEL` | channel for draft cards (name or id) |
 | `SLACK_ALERT_CHANNEL` | channel for notices (optional, falls back to the draft channel) |
 | `LEARN_INTERVAL_MINUTES` | `30` (the learning loop runs inside the app; 0 turns it off) |
-| `PRICE_SENTENCE` | the price sentence Aryan approves, used word for word. Empty: cards say "Price not confirmed" |
+| `PRICE_SENTENCE` | the M&A price sentence, used word for word (non-M&A campaigns ignore it). Current value: `But to give you an idea we work on a hybrid model of retainer + success fee.` Empty: M&A price cards say "Price not confirmed" |
 | `DRAFT_MODEL`, `CLASSIFIER_MODEL`, `DRAFT_MIN_CONFIDENCE`, `CLASSIFIER_MIN_CONFIDENCE*` | optional; defaults are fine |
 
 `PORT` is set by Railway. Do not set `RAILWAY_ENVIRONMENT`; Railway sets it.

@@ -14,10 +14,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.classify.classifier import Classification
-from app.classify.routing import LANE_HUMAN_ONLY, Route
+from app.classify.routing import LANE_HUMAN_ONLY, OBJECTION_NOTE, Route
 from app.db.client import Row, fetch_drafts, insert_draft
 from app.db.records import DraftStatus, NewDraft
-from app.examples.drafter import DRAFT_VERSION
+from app.examples.drafter import DRAFT_VERSION, OBJECTION_LABELS, OBJECTION_NO_DRAFT
 from app.ingest.deps import IngestDeps
 from app.smartlead.models import Message
 from app.validate.validator import explain, placeholders
@@ -98,6 +98,12 @@ def _prepare_from_examples(
         min_confidence=deps.config.draft_min_confidence,
     )
     if outcome.kind != "drafted" or not outcome.text:
+        if result.label in OBJECTION_LABELS:
+            return (
+                Route(LANE_HUMAN_ONLY, OBJECTION_NO_DRAFT, note=OBJECTION_NOTE),
+                DraftView(None, None, False, (), False),
+                None,
+            )
         note = f"No draft: {outcome.reason}"
         return (
             Route(LANE_HUMAN_ONLY, outcome.reason),

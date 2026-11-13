@@ -4,9 +4,11 @@ The file is text or markdown: one template per section, the situation as the hea
 starts with #, or a line ending with a colon followed by the template). The heading becomes the
 "prospect reply" the library matches on, the section body is Gamic's reply word for word.
 
-Which label a section belongs to: put it in square brackets in the heading, for example
-`## They ask what it costs [price_question]`. Without brackets the heading is matched on keywords
-(`KEYWORDS`); a heading that matches nothing is reported and not imported, never guessed.
+Which label a section belongs to: the heading `## label | situation` (for example
+`## price_question | Price`), or the label in square brackets at the end of the heading, for
+example `## They ask what it costs [price_question]`. Without either the heading is matched
+on keywords (`KEYWORDS`); a heading that matches nothing is reported and not imported, never
+guessed.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from app.db.records import ExampleSource, NewExample
 
 SOP_PRIORITY = 100
 LABELS_YAML = Path(__file__).resolve().parent.parent / "config" / "labels.yaml"
-_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$")
+_HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
 _TAG = re.compile(r"\[([a-z_]+)\]\s*$")
 
 # Ordered: the first keyword group found in the heading wins.
@@ -53,27 +55,33 @@ def valid_labels() -> frozenset[str]:
 
 def parse_sections(text: str) -> list[Section]:
     """Sections split on heading lines (# ...). Text before the first heading is ignored."""
-    sections: list[Section] = []
+    found: list[tuple[int, Section]] = []
     heading: str | None = None
+    level = 0
     body: list[str] = []
 
     def close() -> None:
         if heading is not None and "".join(body).strip():
-            sections.append(Section(heading, "\n".join(body).strip()))
+            found.append((level, Section(heading, "\n".join(body).strip())))
 
     for line in text.splitlines():
         match = _HEADING.match(line)
         if match:
             close()
-            heading, body = match.group(1).strip(), []
+            level, heading, body = len(match.group(1)), match.group(2).strip(), []
         else:
             body.append(line)
     close()
-    return sections
+    deepest = max((lvl for lvl, _ in found), default=0)
+    # A file title (# ...) above the ## templates is not a template.
+    return [s for lvl, s in found if lvl > 1 or deepest == 1]
 
 
 def label_for(heading: str, labels: frozenset[str]) -> tuple[str | None, str]:
     """(label or None, the situation text without the [label] tag)."""
+    head, bar, rest = heading.partition("|")
+    if bar and head.strip() in labels:
+        return head.strip(), rest.strip()
     tag = _TAG.search(heading)
     if tag:
         situation = heading[: tag.start()].strip()

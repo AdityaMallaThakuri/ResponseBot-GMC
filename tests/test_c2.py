@@ -114,6 +114,7 @@ def test_the_draft_lane_covers_exactly_the_labels_that_are_drafted() -> None:
     assert set(DRAFT_LABELS) == {
         "meeting_request", "info_request", "free_list_request", "price_question",
         "price_and_info", "lead_magnet_request", "trial_request", "booked_confirmation",
+        "objection_info", "objection_price",
     }  # fmt: skip
 
 
@@ -130,10 +131,9 @@ def test_out_of_office_and_auto_replies_get_a_short_note() -> None:
 
 
 @pytest.mark.parametrize("label", ["objection_info", "objection_price"])
-def test_objections_get_no_draft_and_a_note_for_ray(label: str) -> None:
+def test_objections_go_to_the_draft_lane_where_the_drafter_decides(label: str) -> None:
     plan = route(llm(label, 0.95), 0.75, 0.90)
-    assert plan.lane == LANE_HUMAN_ONLY
-    assert plan.note == "Objection: Ray to write this one"
+    assert plan.lane == LANE_DRAFT  # drafted only for M&A with a matching SOP template
 
 
 def test_do_not_contact_would_suppress_when_confident_enough() -> None:

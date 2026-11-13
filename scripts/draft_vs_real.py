@@ -198,6 +198,25 @@ def main() -> None:
                     r.get("vertical") or "",
                 )
             )
+    sop_file = ROOT / "sop_gmc.md"  # Ray's templates (never committed)
+    if sop_file.exists():
+        from app.examples.sop import sop_examples
+
+        for t in sop_examples(sop_file.read_text(encoding="utf-8-sig"))[0]:
+            pool.append(
+                Example(
+                    t.source.value,
+                    t.source_thread_id,
+                    t.campaign_name,
+                    t.label,
+                    t.prospect_reply,
+                    t.gamic_reply,
+                    t.replied_at,
+                    t.sent_at,
+                    t.priority,
+                    t.vertical or "ma",
+                )
+            )
     print(f"Library for the test: {len(pool)} examples ({len(history)} history)")
     all_pool = pool
     hidden: set[str] = set()  # examples hidden for the current row (its own answer, copies of it)
@@ -206,6 +225,7 @@ def main() -> None:
         client,
         settings.DRAFT_MODEL,
         settings.PRICE_SENTENCE,
+        vertical_of=lambda thread: str(thread.get("vertical") or ""),
     )
 
     data = {r["thread_id"]: r for r in read_csv(DATA / "gmc_all_replies_dataset.csv")}
@@ -213,6 +233,7 @@ def main() -> None:
 
     results: list[dict[str, Any]] = []
     failed: list[str] = []
+    table: list[tuple[Any, ...]] = []
     from app.smartlead.clean import clean_body
 
     for n, row in enumerate(rows, 1):
@@ -227,12 +248,11 @@ def main() -> None:
             for e in all_pool
             if e.source_thread_id == thread_id or similarity(e.gamic_reply, real) >= 90
         )
+        vertical = verticals.for_campaign(int(data[thread_id]["campaign_id"]), row["campaign_name"])
         outcome = drafter.draft(
             thread={
                 "campaign_name": row["campaign_name"],
-                "vertical": verticals.for_campaign(
-                    int(data[thread_id]["campaign_id"]), row["campaign_name"]
-                ),
+                "vertical": vertical,
                 "lead_first_name": first if first.isalpha() else "",
             },
             label=row["gold"],
@@ -244,6 +264,18 @@ def main() -> None:
         )
         if outcome.kind != "drafted" or not outcome.text:
             failed.append(f"{thread_id} ({outcome.reason})")
+            table.append(
+                (
+                    len(table) + 1,
+                    row["gold"],
+                    vertical,
+                    "-",
+                    word_count(real),
+                    None,
+                    None,
+                    outcome.reason,
+                )
+            )
             continue
         closest = select_examples(
             [e for e in all_pool if e.source_thread_id not in hidden],
@@ -251,9 +283,13 @@ def main() -> None:
             row["campaign_name"],
             k=1,
             reply=prospect,
+            vertical=vertical,
         )
+        used = [e for e in outcome.examples[:1] if e.source == "sop"]
         results.append(
             {
+                "vertical": vertical,
+                "first_example": "SOP" if used else "history",
                 "thread_id": thread_id,
                 "gold": row["gold"],
                 "campaign": row["campaign_name"],
@@ -276,6 +312,20 @@ def main() -> None:
 
     if not results:
         raise SystemExit("no drafts were made")
+    for r in results:
+        table.append(
+            (
+                len(table) + 1,
+                r["gold"],
+                r["vertical"],
+                r["draft_words"],
+                r["real_words"],
+                round(r["score"], 1),
+                round(r["baseline"], 1),
+                f"first example: {r['first_example']}"
+                + (f", figures: {', '.join(r['flagged'])}" if r["flagged"] else ""),
+            )
+        )
     stats = summary(results, failed)
     header = [
         "# Draft vs real",
@@ -293,6 +343,19 @@ def main() -> None:
     body = [block(i, r) for i, r in enumerate(results, 1)]
     REPORT.write_text("\n".join(header) + "\n" + "\n".join(body), encoding="utf-8")
     print("\n" + "\n".join(stats))
+    print("\n#  label                vertical    draft real  sim   closest  note")
+    for n, label, vert, dw, rw, sim, base, note in table:
+        print(f"{n:<3}{label:<21}{vert:<12}{dw!s:<6}{rw:<5}{sim!s:<6}{base!s:<9}{note}")
+    for label in ("meeting_request", "price_question", "objection_info", "objection_price"):
+        shown = next((r for r in results if r["gold"] == label), None)
+        if shown:
+            print(
+                f"\n===== {label}: draft {shown['draft_words']} words, "
+                f"real {shown['real_words']} words"
+            )
+            print(shown["prospect"][:500].strip())
+            print("--- our draft")
+            print(redactor(shown["lead_name"])(shown["draft"]).strip())
     print(f"\nReport: {REPORT}")
 
 
