@@ -169,7 +169,7 @@ def _campaigns(n: int) -> str:
 
 
 def summary_line(prefix: str, total: int, new: list[Watched], first_ever: bool) -> str:
-    """"Watching N campaigns. New: a, b, and X more." The first-ever run gives the total only."""
+    """ "Watching N campaigns. New: a, b, and X more." The first-ever run gives the total only."""
     line = f"{prefix} {_campaigns(total)}"
     if first_ever:
         return f"{line}."

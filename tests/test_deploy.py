@@ -18,12 +18,15 @@ def test_gather_marks_children_and_existing_hooks() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         assert req.method == "GET"  # read only
         if req.url.path.endswith("/campaigns/"):
-            return httpx.Response(200, json=[
-                {"id": 1, "name": "GMC - A"},
-                {"id": 2, "name": "A follow-up", "parent_campaign_id": 1},
-                {"id": 5, "name": "GMC - C", "client_id": 7},
-                {"id": 6, "name": "C POS REPLY", "parent_campaign_id": 5},
-            ])
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": 1, "name": "GMC - A"},
+                    {"id": 2, "name": "A follow-up", "parent_campaign_id": 1},
+                    {"id": 5, "name": "GMC - C", "client_id": 7},
+                    {"id": 6, "name": "C POS REPLY", "parent_campaign_id": 5},
+                ],
+            )
         if req.url.path.endswith("/1/webhooks"):
             return httpx.Response(200, json=[{"id": 11, "webhook_url": OURS}])
         return httpx.Response(200, json=[{"id": 12, "webhook_url": "https://other.example/h"}])
@@ -59,11 +62,14 @@ def test_detach_removes_only_our_webhooks_by_id() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         calls.append((req.method, req.url.path, req.content))
         if req.method == "GET":
-            return httpx.Response(200, json=[
-                {"id": 11, "webhook_url": OURS},
-                {"id": 12, "webhook_url": "https://other.example/webhooks/smartlead?secret=x"},
-                {"id": 13, "webhook_url": f"{BASE}/other"},
-            ])
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": 11, "webhook_url": OURS},
+                    {"id": 12, "webhook_url": "https://other.example/webhooks/smartlead?secret=x"},
+                    {"id": 13, "webhook_url": f"{BASE}/other"},
+                ],
+            )
         return httpx.Response(200, json={"ok": True})
 
     client = make_client(handler)

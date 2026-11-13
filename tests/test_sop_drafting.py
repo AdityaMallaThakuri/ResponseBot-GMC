@@ -208,3 +208,32 @@ def test_an_objection_with_no_draft_keeps_the_note_for_ray() -> None:
     )
     assert plan.lane == "human_only" and plan.note == OBJECTION_NOTE
     assert view.text is None and draft_id is None
+
+
+ROW_1_REPLY = "That's exactly what we do in our origination service."
+SEC_REPLY = (
+    "How many M&A firms have you worked with? How many of those were registered with the SEC?"
+)
+
+
+def test_the_matching_prompt_lists_we_already_do_this_as_the_broker_network_situation() -> None:
+    fake = model(match=1, reply="Hey Pat, we complement your broker network.")
+    out = draft(make(fake), "objection_info", reply=ROW_1_REPLY)
+    assert out.kind == "drafted"
+    assert out.examples[0].prospect_reply == "We already have a broker network"
+    system = fake.calls[0]["system"][0]["text"]
+    for phrase in (
+        "we already do this",
+        "that's what we do",
+        "we do this in-house",
+        "we already have a provider",
+        "broker network",
+        "SEC registered",
+    ):
+        assert phrase in system
+    assert ROW_1_REPLY in fake.calls[0]["messages"][0]["content"]
+
+
+def test_a_question_the_templates_do_not_answer_still_goes_to_ray() -> None:
+    out = draft(make(model(match=0)), "objection_info", reply=SEC_REPLY)
+    assert (out.kind, out.reason) == ("no_draft", OBJECTION_NO_DRAFT)
