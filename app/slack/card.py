@@ -138,8 +138,12 @@ class ReplyCard:
     draft_flags: tuple[str, ...] = ()  # numbers, prices and percentages in the draft
     draft_notes: tuple[str, ...] = ()
     thread_url: str | None = None  # opens the thread in Smartlead's master inbox
+    # Only scripts/post_replies.py sets this (a reply already sent for an old thread). A live
+    # card never has it.
+    actually_sent: str | None = None
 
 
+SENT_LIMIT = 600  # characters of "What we actually sent"
 DRAFT_LIMIT = 2800  # a Slack section holds 3000 characters
 SMARTLEAD_THREAD_URL = "https://app.smartlead.ai/app/master-inbox?action=INBOX&leadMap={}"
 
@@ -234,6 +238,11 @@ def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
     if card.draft_text is not None:
         words = len(card.draft_text.split())
         text = f"*Draft reply* (copy it, {words} words)\n{code_block(card.draft_text)}"
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": text}})
+    if card.actually_sent:
+        sent = card.actually_sent.strip()
+        shown = sent if len(sent) <= SENT_LIMIT else sent[: SENT_LIMIT - 1] + "…"
+        text = f"*What we actually sent:*\n{code_block(shown)}"
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": text}})
     if card.thread_url:
         link = f"<{escape_mrkdwn(card.thread_url)}|Open thread in Smartlead>"

@@ -123,6 +123,7 @@ def _card(
     result: Classification | None,
     plan: Route,
     view: DraftView | None = None,
+    actually_sent: str | None = None,
 ) -> ReplyCard:
     return ReplyCard(
         thread_ref=thread["id"],
@@ -139,6 +140,7 @@ def _card(
         draft_flags=view.flags if view else (),
         draft_notes=view.notes if view else (),
         thread_url=smartlead_thread_url(thread.get("email_lead_map_id")),
+        actually_sent=actually_sent,
     )
 
 
@@ -192,8 +194,9 @@ def handle_first_reply(
         raise StepError(
             "no Slack channel configured: set SLACK_DRAFT_CHANNEL (SLACK_ALERT_CHANNEL is optional)"
         )
+    sent = deps.actually_sent(thread, stored) if deps.actually_sent else None
     ts, channel_id = post_reply_card(
-        deps.slack, channel, _card(thread, payload, first, result, plan, view)
+        deps.slack, channel, _card(thread, payload, first, result, plan, view, sent)
     )
     if plan.lane == LANE_WOULD_SUPPRESS:
         db_lane = CardLane.AUTO_ACTION

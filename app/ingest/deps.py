@@ -57,6 +57,9 @@ class IngestDeps:
     watcher: Any | None = None
     # app.examples.verticals.VerticalResolver: sets threads.vertical and example verticals.
     verticals: Any | None = None
+    # Only scripts/post_replies.py sets this: (thread row, stored messages) -> the reply we
+    # already sent after the lead's reply, or None. Live ingest leaves it None.
+    actually_sent: Any | None = None
     config: IngestConfig = field(default_factory=IngestConfig)
 
 
