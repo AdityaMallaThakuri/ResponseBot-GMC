@@ -51,15 +51,9 @@ def test_a_live_card_has_no_actually_sent_section() -> None:
 
 def test_the_script_card_shows_what_we_actually_sent_first_600_characters() -> None:
     blocks = build_reply_card_blocks(card(actually_sent="Hi Pat, " + "x" * 700))
-    text = next(
-        b["text"]["text"]
-        for b in blocks
-        if "What we actually sent:" in b.get("text", {}).get("text", "")
-    )
-    assert text.count("x") <= 600 and text.endswith("```")
-    draft_at = next(i for i, b in enumerate(blocks) if "Draft reply" in str(b))
-    sent_at = next(i for i, b in enumerate(blocks) if "What we actually sent" in str(b))
-    assert sent_at == draft_at + 1  # under the draft
+    assert blocks[-2]["type"] == "divider"  # a small section at the bottom
+    text = blocks[-1]["elements"][0]["text"]
+    assert text.startswith("*What we actually sent:* Hi Pat,") and text.count("x") <= 600
 
 
 def test_a_notice_card_can_show_it_too() -> None:

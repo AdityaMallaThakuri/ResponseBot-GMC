@@ -38,7 +38,7 @@ from app.db.records import (
 )
 from app.ingest.deps import IngestDeps
 from app.ingest.draft_step import DraftView, draft_enabled, prepare_draft
-from app.slack.card import ReplyCard, post_reply_card, smartlead_thread_url
+from app.slack.card import ReplyCard, card_kind, post_reply_card, smartlead_thread_url
 from app.smartlead.models import Direction, Message
 
 logger = logging.getLogger(__name__)
@@ -124,6 +124,7 @@ def _card(
     plan: Route,
     view: DraftView | None = None,
     actually_sent: str | None = None,
+    low_confidence: bool = False,
 ) -> ReplyCard:
     return ReplyCard(
         thread_ref=thread["id"],
@@ -138,9 +139,11 @@ def _card(
         note=plan.note,
         draft_text=view.text if view else None,
         draft_flags=view.flags if view else (),
-        draft_notes=view.notes if view else (),
+        draft_notes=(view.notes if view else ())
+        + (() if result is not None else ("Classifier error: check the thread",)),
         thread_url=smartlead_thread_url(thread.get("email_lead_map_id")),
         actually_sent=actually_sent,
+        low_confidence=low_confidence,
     )
 
 
@@ -189,15 +192,15 @@ def handle_first_reply(
             deps, thread, classification_id, result, first, outreach, plan
         )
 
-    channel = cfg.channel_for(plan.lane)
+    sent = deps.actually_sent(thread, stored) if deps.actually_sent else None
+    low = result is not None and result.confidence < cfg.min_confidence
+    card = _card(thread, payload, first, result, plan, view, sent, low)
+    channel = cfg.channel_for_kind(card_kind(card))
     if not channel:
         raise StepError(
             "no Slack channel configured: set SLACK_DRAFT_CHANNEL (SLACK_ALERT_CHANNEL is optional)"
         )
-    sent = deps.actually_sent(thread, stored) if deps.actually_sent else None
-    ts, channel_id = post_reply_card(
-        deps.slack, channel, _card(thread, payload, first, result, plan, view, sent)
-    )
+    ts, channel_id = post_reply_card(deps.slack, channel, card)
     if plan.lane == LANE_WOULD_SUPPRESS:
         db_lane = CardLane.AUTO_ACTION
     elif plan.lane == LANE_DRAFT and draft_id:

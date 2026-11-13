@@ -25,6 +25,13 @@ class IngestConfig:
     draft_channel: str | None = None  # draft-lane cards
     alert_channel: str | None = None  # human_only and would_suppress notices; falls back to draft
 
+    def channel_for_kind(self, kind: str) -> str | None:
+        """A one-line "notice" card goes to the alert channel (else the draft channel); a draft
+        card, or a card where a person writes the reply, goes to the draft channel."""
+        if kind == "notice":
+            return self.alert_channel or self.draft_channel
+        return self.draft_channel or self.alert_channel
+
     def channel_for(self, lane: str) -> str | None:
         if lane == "draft":
             return self.draft_channel

@@ -250,11 +250,11 @@ def test_the_name_marker_is_filled_or_dropped() -> None:
 def test_a_name_from_an_example_never_reaches_the_new_lead() -> None:
     from app.examples.drafter import adapt_example
 
-    old = "Richard, I've sent over an invite. Speak soon."
-    assert adapt_example(old, "Hunter").startswith("Hunter, I've sent")
+    old = "Roger, I've sent over an invite. Speak soon."
+    assert adapt_example(old, "Harper").startswith("Harper, I've sent")
     assert adapt_example(old, "").startswith("Hi, I've sent")
-    assert adapt_example("Sure, happy to talk.", "Hunter") == "Sure, happy to talk."
-    assert adapt_example("Hey Richard, thanks.", "Hunter") == "Hey Hunter, thanks."
+    assert adapt_example("Sure, happy to talk.", "Harper") == "Sure, happy to talk."
+    assert adapt_example("Hey Roger, thanks.", "Harper") == "Hey Harper, thanks."
 
 
 def test_a_library_price_sentence_is_a_price_never_a_scheduling_line() -> None:

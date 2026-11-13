@@ -130,6 +130,7 @@ class ExampleOutcome:
     word_count: int = 0
     word_limit: int = 0  # median word count of the examples shown (plus the price sentence)
     length_fix: str = ""  # "" (fit), "shortened" (asked again) or "closest_example" (fallback)
+    vertical: str = ""  # the campaign's vertical the draft was written for
 
 
 def word_count(text: str) -> int:
@@ -614,6 +615,7 @@ class ExampleDrafter:
             word_count=word_count(text),
             word_limit=limit,
             length_fix=length_fix,
+            vertical=vertical,
         )
 
     def _match_objection(

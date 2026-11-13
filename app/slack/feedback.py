@@ -17,7 +17,7 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from app.db.client import Database, find_slack_card, get_draft, update_draft
-from app.slack.card import BAD_DRAFT, GOOD_DRAFT, feedback_resolved_blocks
+from app.slack.card import BAD_DRAFT, GOOD_DRAFT, OPEN_THREAD, feedback_resolved_blocks
 
 log = logging.getLogger(__name__)
 
@@ -90,3 +90,8 @@ def register_feedback_handlers(app: AsyncApp, record: FeedbackRecorder) -> None:
 
     for action_id in (GOOD_DRAFT, BAD_DRAFT):
         app.action(action_id)(make(action_id))
+
+    async def open_thread(ack: AsyncAck) -> None:
+        await ack()  # "Open in Smartlead" is a URL button: the click only opens the link
+
+    app.action(OPEN_THREAD)(open_thread)

@@ -489,7 +489,7 @@ def test_a_new_reply_gets_an_example_draft_on_a_copy_card() -> None:
     (post,) = deps.slack.posts
     text = json.dumps(post["blocks"])
     assert "here is how it works in two steps." in text and "```" in text
-    assert actions(post) == ["draft_good", "draft_bad"]
+    assert actions(post) == ["open_thread", "draft_good", "draft_bad"]
     assert rows(deps.db, "slack_cards")[0]["lane"] == "draft"
 
 
@@ -499,7 +499,7 @@ def test_a_removed_figure_sentence_is_noted_on_the_card() -> None:
     (draft,) = rows(deps.db, "drafts")
     assert "40%" not in draft["text"] and draft["validator_result"]["removed_sentences"] == 1
     text = json.dumps(deps.slack.posts[0]["blocks"])
-    assert "Removed 1 sentence(s) with a number, price or percentage" in text
+    assert "Removed 1 sentence(s) with a number that is not allowed" in text
 
 
 def test_a_price_from_the_library_is_stated_and_highlighted_on_the_card() -> None:
@@ -512,7 +512,7 @@ def test_a_price_from_the_library_is_stated_and_highlighted_on_the_card() -> Non
     (draft,) = rows(deps.db, "drafts")
     assert draft["validator_result"]["flagged"] == ["$3,000"]
     text = json.dumps(deps.slack.posts[0]["blocks"])
-    assert "Check these figures before you send" in text and "`$3,000`" in text
+    assert "Check these figures: $3,000" in text
 
 
 def test_the_draft_card_never_has_approve_edit_or_skip() -> None:
@@ -527,7 +527,7 @@ def test_a_draft_with_placeholders_says_to_fill_them_in() -> None:
     deps = make_deps(reply_with("Hey Pat. How about [TIME OPTIONS]? Details: [LINK]"))
     run(deps)
     text = json.dumps(deps.slack.posts[0]["blocks"])
-    assert "Fill in [LINK], [TIME OPTIONS] before you send." in text
+    assert "Fill in [LINK], [TIME OPTIONS]" in text
 
 
 def test_no_examples_for_the_label_means_a_human_notice_with_no_draft() -> None:
@@ -536,7 +536,9 @@ def test_no_examples_for_the_label_means_a_human_notice_with_no_draft() -> None:
     run(deps)
     assert not rows(deps.db, "drafts")
     (post,) = deps.slack.posts
-    assert actions(post) == [] and "human only" in json.dumps(post["blocks"])
+    assert actions(post) == ["open_thread"] and "Ray to write this one" in json.dumps(
+        post["blocks"]
+    )
 
 
 def test_do_not_contact_gets_a_do_not_reply_card_and_no_model_call() -> None:
@@ -545,7 +547,7 @@ def test_do_not_contact_gets_a_do_not_reply_card_and_no_model_call() -> None:
     run(deps)
     assert not model.calls and not rows(deps.db, "drafts")
     text = json.dumps(deps.slack.posts[0]["blocks"])
-    assert "DO NOT REPLY" in text and actions(deps.slack.posts[0]) == []
+    assert "unsubscribe: do not reply" in text and actions(deps.slack.posts[0]) == []
 
 
 @pytest.mark.parametrize("label", ["out_of_office", "auto_reply_or_bounce"])
@@ -554,7 +556,8 @@ def test_out_of_office_and_auto_replies_get_a_short_note_and_no_draft(label: str
     deps = make_deps(model, label=label, conf=0.95)
     run(deps)
     assert not model.calls and not rows(deps.db, "drafts")
-    assert "no reply needed" in json.dumps(deps.slack.posts[0]["blocks"])
+    words = {"out_of_office": "out of office", "auto_reply_or_bounce": "automatic reply"}[label]
+    assert words in json.dumps(deps.slack.posts[0]["blocks"])
 
 
 def test_nothing_is_sent_and_smartlead_is_only_read() -> None:
@@ -621,7 +624,10 @@ def test_a_feedback_click_replaces_the_buttons_with_who_said_what() -> None:
 
     asyncio.run(handle_feedback_click("draft_good", ack, body, Client(), record))
     (update,) = updates
-    assert not [b for b in update["blocks"] if b["type"] == "actions"]
+    left = [
+        e["action_id"] for b in update["blocks"] if b["type"] == "actions" for e in b["elements"]
+    ]
+    assert left == ["open_thread"]  # Good and Bad are replaced; the Open button stays
     assert "<@U012ABCDEF> marked this a good draft" in json.dumps(update["blocks"])
     assert rows(deps.db, "drafts")[0]["feedback"] == "good"
     asyncio.run(handle_feedback_click("draft_bad", ack, body, Client(), record))

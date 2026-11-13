@@ -60,16 +60,12 @@ def view_from_row(row: Row) -> tuple[Route | None, DraftView]:
     notes = notes_for(blockers, warnings)
     if row["template_id"] == EXAMPLES_TEMPLATE_ID:
         if placeholders(text):
-            notes = (*notes, "Fill in " + ", ".join(placeholders(text)) + " before you send.")
-        if result.get("price_confirmed") is False:
-            notes = (*notes, "Price not confirmed: check with Aryan.")
+            notes = (*notes, "Fill in " + ", ".join(placeholders(text)))
+        if result.get("price_confirmed") is False and result.get("vertical") == "ma":
+            notes = (*notes, "Price not confirmed: check with Aryan")  # M&A, no PRICE_SENTENCE
         removed = int(result.get("removed_sentences") or 0)
         if removed:
-            notes = (
-                *notes,
-                f"Removed {removed} sentence(s) with a number, price or percentage that is "
-                "not allowed in this reply.",
-            )
+            notes = (*notes, f"Removed {removed} sentence(s) with a number that is not allowed")
     return None, DraftView(
         text,
         row["template_id"],
@@ -133,6 +129,7 @@ def _prepare_from_examples(
                 "word_count": outcome.word_count,
                 "word_limit": outcome.word_limit,
                 "length_fix": outcome.length_fix,
+                "vertical": outcome.vertical,
             },
         ),
     )

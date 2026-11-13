@@ -56,7 +56,9 @@ def slack_note_poster(settings: Any, slack: Any) -> Callable[[str], None]:
         if not channel:
             log.info("no Slack channel set; note not posted")
             return
-        slack.chat_postMessage(channel=channel, text=escape_mrkdwn(text))
+        slack.chat_postMessage(
+            channel=channel, text=escape_mrkdwn(text), unfurl_links=False, unfurl_media=False
+        )
 
     return post
 

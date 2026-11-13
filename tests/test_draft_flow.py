@@ -100,8 +100,8 @@ def test_the_card_shows_the_draft_and_the_feedback_buttons() -> None:
     run(deps)
     (post,) = deps.slack.posts
     text = text_of(post)
-    assert "Draft reply" in text and "Thanks for asking about send times." in text
-    assert buttons(post) == ["draft_good", "draft_bad"]
+    assert " words" in text and "Thanks for asking about send times." in text
+    assert buttons(post) == ["open_thread", "draft_good", "draft_bad"]
     card = rows(deps.db, "slack_cards")[0]
     assert card["lane"] == "draft" and card["draft_id"] == rows(deps.db, "drafts")[0]["id"]
     assert post["channel"] == "drafts" and "Thanks for asking" not in post["text"]
@@ -111,7 +111,7 @@ def test_a_draft_with_a_placeholder_still_gets_the_feedback_buttons() -> None:
     deps = make_deps("meeting_request")
     run(deps)
     (post,) = deps.slack.posts
-    assert buttons(post) == ["draft_good", "draft_bad"]
+    assert buttons(post) == ["open_thread", "draft_good", "draft_bad"]
     assert "Approve is blocked until [TIME OPTIONS] is filled in" in text_of(post)
     assert "[TIME OPTIONS]" in text_of(post)
     assert rows(deps.db, "drafts")[0]["validator_result"]["approve_blockers"] == [
@@ -131,12 +131,8 @@ def test_a_blocked_draft_is_stored_as_failed_and_goes_to_human_only() -> None:
     assert "claim_not_usable:calendar_link" in draft["validator_result"]["blocking"]
     (post,) = deps.slack.posts
     text = text_of(post)
-    assert (
-        "human only" in text
-        and "Draft blocked:" in text
-        and "not approved for this campaign" in text
-    )
-    assert "Draft reply" not in text and buttons(post) == []  # the blocked text is not shown
+    assert "Draft blocked:" in text and "not approved for this campaign" in text
+    assert " words" not in text and buttons(post) == ["open_thread"]  # blocked text not shown
     card = rows(deps.db, "slack_cards")[0]
     assert card["lane"] == "human_only" and card["draft_id"] == draft["id"]
 
@@ -148,7 +144,7 @@ def test_no_template_for_the_label_goes_to_human_only() -> None:
     assert not rows(deps.db, "drafts")
     (post,) = deps.slack.posts
     assert "No draft: no approved template for info_request" in text_of(post)
-    assert buttons(post) == [] and "human only" in text_of(post)
+    assert buttons(post) == ["open_thread"] and "Ray to write this one" in text_of(post)
     assert rows(deps.db, "slack_cards")[0]["lane"] == "human_only"
 
 
@@ -163,7 +159,7 @@ def test_below_the_draft_threshold_goes_to_human_only() -> None:
 def test_labels_outside_the_draft_lane_are_never_drafted(label: str) -> None:
     deps = make_deps(label, confidence=0.99)
     run(deps)
-    assert not rows(deps.db, "drafts") and buttons(deps.slack.posts[0]) == []
+    assert not rows(deps.db, "drafts") and "draft_good" not in buttons(deps.slack.posts[0])
 
 
 def test_do_not_contact_is_never_drafted() -> None:
@@ -192,8 +188,8 @@ def test_with_no_drafter_the_card_is_the_c2_card() -> None:
     deps = make_deps("info_request")
     deps.drafter = None
     run(deps)
-    assert not rows(deps.db, "drafts") and "Draft reply" not in text_of(deps.slack.posts[0])
-    assert buttons(deps.slack.posts[0]) == []  # no draft, so no buttons at all
+    assert not rows(deps.db, "drafts") and " words" not in text_of(deps.slack.posts[0])
+    assert buttons(deps.slack.posts[0]) == ["open_thread"]  # no draft: only the Open button
 
 
 # ------------------------------------------------------------------ Approve, Skip, Edit
@@ -524,7 +520,7 @@ def card(**over: Any) -> ReplyCard:
 
 def test_the_draft_is_escaped_and_labelled() -> None:
     text = json.dumps(build_reply_card_blocks(card()))
-    assert "Draft reply" in text and "Line two &lt;b&gt;&amp;&lt;/b&gt;" in text
+    assert " words" in text and "Line two &lt;b&gt;&amp;&lt;/b&gt;" in text
     assert "<b>" not in text
 
 

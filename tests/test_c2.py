@@ -62,10 +62,12 @@ class FakeSlack:
         self.fail = fail
         self.posts: list[dict[str, Any]] = []
 
-    def chat_postMessage(self, channel: str, text: str, blocks: list) -> dict[str, str]:  # noqa: N802
+    def chat_postMessage(  # noqa: N802
+        self, channel: str, text: str, blocks: list, **extra: Any
+    ) -> dict[str, str]:
         if self.fail:
             raise RuntimeError("slack is down")
-        self.posts.append({"channel": channel, "text": text, "blocks": blocks})
+        self.posts.append({"channel": channel, "text": text, "blocks": blocks, **extra})
         return {"ts": f"1000.{len(self.posts)}", "channel": "C0TEST"}
 
 
@@ -222,7 +224,8 @@ def test_do_not_contact_records_would_suppress_and_posts_a_notice_but_calls_noth
     )
     (post_,) = slack.posts
     text = all_text(post_["blocks"])
-    assert "DO NOT REPLY" in text and "actions" not in [b["type"] for b in post_["blocks"]]
+    assert "unsubscribe: do not reply" in text
+    assert "actions" not in [b["type"] for b in post_["blocks"]]
     assert rows(db, "slack_cards")[0]["lane"] == "auto_action"
     assert len(smartlead.thread_calls) == 1  # only C1's read of the thread
 
@@ -231,11 +234,8 @@ def test_not_interested_posts_a_notice_with_suggest_close_and_no_action() -> Non
     db, slack = FakeDb(), FakeSlack()
     run(make_deps(db, FakeClassifier(llm("not_interested", 0.95, "A polite decline.")), slack))
     text = all_text(slack.posts[0]["blocks"])
-    assert (
-        "suggest: close" in text
-        and "human only" in text
-        and "actions" not in [b["type"] for b in slack.posts[0]["blocks"]]
-    )
+    assert "suggest: close" in text
+    assert "actions" not in [b["type"] for b in slack.posts[0]["blocks"]]
     assert not rows(db, "actions") and not rows(db, "drafts")
     assert rows(db, "slack_cards")[0]["lane"] == "human_only"
 
@@ -244,7 +244,7 @@ def test_not_interested_below_0_90_has_no_close_suggestion() -> None:
     slack = FakeSlack()
     run(make_deps(FakeDb(), FakeClassifier(llm("not_interested", 0.85)), slack))
     assert "suggest: close" not in all_text(slack.posts[0]["blocks"])
-    assert "human only" in all_text(slack.posts[0]["blocks"])
+    assert "not interested" in all_text(slack.posts[0]["blocks"])
 
 
 @pytest.mark.parametrize(
@@ -254,7 +254,11 @@ def test_notice_only_labels_post_a_human_only_notice(label: str) -> None:
     db, slack = FakeDb(), FakeSlack()
     run(make_deps(db, FakeClassifier(llm(label, 0.95)), slack))
     blocks = slack.posts[0]["blocks"]
-    assert "human only" in all_text(blocks) and "actions" not in [b["type"] for b in blocks]
+    assert "draft_good" not in all_text(blocks) and "Draft reply" not in all_text(blocks)
+    if label == "off_script":
+        assert "Ray to write this one" in all_text(blocks)
+    else:
+        assert len(blocks) == 1 and "actions" not in [b["type"] for b in blocks]
     assert not rows(db, "actions")
 
 
@@ -262,19 +266,21 @@ def test_low_confidence_goes_to_a_human_with_no_buttons() -> None:
     slack = FakeSlack()
     run(make_deps(FakeDb(), FakeClassifier(llm("info_request", 0.6)), slack))
     blocks = slack.posts[0]["blocks"]
-    assert "human only" in all_text(blocks) and "actions" not in [b["type"] for b in blocks]
+    assert "Ray to write this one" in all_text(blocks)
+    assert "Low confidence: check the label" in all_text(blocks)
+    assert "draft_good" not in all_text(blocks)
 
 
-def test_a_draft_lane_card_without_a_drafter_has_no_buttons() -> None:
+def test_a_draft_lane_card_without_a_drafter_has_no_draft_buttons() -> None:
     db, slack = FakeDb(), FakeSlack()
     run(make_deps(db, FakeClassifier(llm("meeting_request", 0.9)), slack))
     blocks = slack.posts[0]["blocks"]
-    assert "actions" not in [b["type"] for b in blocks]
+    assert "draft_good" not in all_text(blocks) and "Ray to write this one" in all_text(blocks)
     assert rows(db, "slack_cards")[0]["lane"] == "human_only"  # no draft, so no draft card
     assert not rows(db, "drafts")
 
 
-def test_the_card_shows_lead_campaign_reply_label_confidence_reason_and_lane() -> None:
+def test_the_card_shows_lead_campaign_reply_and_label_in_plain_words() -> None:
     db, slack = FakeDb(), FakeSlack()
     run(make_deps(db, FakeClassifier(llm("info_request", 0.82, "Asks how it works.")), slack))
     post_ = slack.posts[0]
@@ -283,12 +289,11 @@ def test_the_card_shows_lead_campaign_reply_label_confidence_reason_and_lane() -
         "Jane",
         "GMC - Example Campaign",
         REPLY_TEXT,
-        "info_request",
-        "0.82",
-        "Asks how it works.",
-        "lane:",
+        "info request",
     ):
         assert expected in text
+    for gone in ("0.82", "Asks how it works.", "lane:", "Reason"):
+        assert gone not in text
     assert REPLY_TEXT not in post_["text"]  # the notification text has no email body
 
 
@@ -298,8 +303,8 @@ def test_a_classifier_error_posts_a_human_only_notice_and_stores_no_classificati
         outcome = run(make_deps(db, FakeClassifier(error=error), slack))
         assert outcome.classified and not rows(db, "classifications")
         text = all_text(slack.posts[0]["blocks"])
-        assert "classifier error" in text and "human only" in text
-        assert "actions" not in [b["type"] for b in slack.posts[0]["blocks"]]
+        assert "Classifier error" in text and "Ray to write this one" in text
+        assert "draft_good" not in text
         assert rows(db, "raw_events")[0]["processed"] is True
 
 
