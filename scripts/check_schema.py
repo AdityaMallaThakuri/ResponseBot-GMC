@@ -25,6 +25,7 @@ QUOTED = re.compile(r"'([a-z_][a-z0-9_]*)'")
 # Columns the application code reads or writes, including ones added by ALTER TABLE.
 REQUIRED_COLUMNS: dict[str, dict[str, str]] = {
     "threads": {"vertical": "text"},
+    "reply_examples": {"vertical": "text"},
     "messages": {"message_id": "text", "from_address": "text", "to_address": "text"},
     "classifications": {"extracted_facts": "jsonb"},
     "drafts": {"template_version": "text", "model": "text", "validator_result": "jsonb"},

@@ -161,7 +161,11 @@ def main() -> None:
     settings = get_settings()
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, max_retries=5)
 
-    history, _ = load_history()
+    from app.examples.verticals import VerticalResolver
+    from app.smartlead.client import SmartleadClient
+
+    verticals = VerticalResolver(SmartleadClient.from_settings(settings).list_campaigns)
+    history, _ = load_history(verticals=verticals)
     pool = [
         Example(
             e.source.value,
@@ -173,6 +177,7 @@ def main() -> None:
             e.replied_at,
             e.sent_at,
             e.priority,
+            e.vertical or "",
         )
         for e in history
     ]
@@ -189,13 +194,15 @@ def main() -> None:
                     r["gamic_reply"],
                     parse_time(r["replied_at"]),
                     parse_time(r["sent_at"]),
+                    0,
+                    r.get("vertical") or "",
                 )
             )
     print(f"Library for the test: {len(pool)} examples ({len(history)} history)")
     all_pool = pool
     hidden: set[str] = set()  # examples hidden for the current row (its own answer, copies of it)
     drafter = ExampleDrafter(
-        lambda label: [e for e in all_pool if e.source_thread_id not in hidden],
+        lambda label, vertical="": [e for e in all_pool if e.source_thread_id not in hidden],
         client,
         settings.DRAFT_MODEL,
         settings.PRICE_SENTENCE,
@@ -223,6 +230,9 @@ def main() -> None:
         outcome = drafter.draft(
             thread={
                 "campaign_name": row["campaign_name"],
+                "vertical": verticals.for_campaign(
+                    int(data[thread_id]["campaign_id"]), row["campaign_name"]
+                ),
                 "lead_first_name": first if first.isalpha() else "",
             },
             label=row["gold"],

@@ -104,6 +104,7 @@ def build_thread(
     item: dict[str, Any] | None,
     payload: dict[str, Any],
     messages: list[Message],
+    vertical: str | None = None,
 ) -> NewThread:
     replies = [m for m in messages if m.direction is Direction.REPLY]
     lead_email = (item or {}).get("lead_email") or lead.email or replies[-1].from_addr
@@ -118,8 +119,19 @@ def build_thread(
         lead_last_name=item.get("lead_last_name"),
         smartlead_category_id=_to_int(item.get("lead_category_id")),
         smartlead_lead_status=item.get("lead_status"),
+        vertical=vertical,
         last_reply_at=replies[-1].timestamp,
     )
+
+
+def _vertical(
+    deps: IngestDeps, lead: Lead, item: dict[str, Any] | None, payload: dict[str, Any]
+) -> str | None:
+    """The thread's vertical, through the campaign tree (a POS REPLY thread takes its parent's)."""
+    if deps.verticals is None:
+        return None
+    name = (item or {}).get("email_campaign_name") or payload.get("campaign_name") or ""
+    return deps.verticals.for_campaign(lead.campaign_id, str(name))
 
 
 def _prior_reply_count(deps: IngestDeps, lead_id: int, campaign_id: int) -> int:
@@ -160,7 +172,9 @@ def process_reply_event(deps: IngestDeps, event_id: str, payload: dict[str, Any]
         return _fail_for_retry(deps, event_id, "fetched thread does not belong to the event's lead")
 
     prior_replies = _prior_reply_count(deps, lead.lead_id, lead.campaign_id)
-    thread = upsert_thread(deps.db, build_thread(lead, item, payload, messages))
+    thread = upsert_thread(
+        deps.db, build_thread(lead, item, payload, messages, _vertical(deps, lead, item, payload))
+    )
     stored = [
         (message, insert_message(deps.db, NewMessage.from_message(thread["id"], message)).row)
         for message in messages

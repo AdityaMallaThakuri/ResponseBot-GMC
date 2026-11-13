@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from typing import Any
 
 from app.db.records import ExampleSource, NewExample
 from app.examples.library import parse_time
@@ -37,8 +38,18 @@ def label_map(gold: list[dict[str, str]], draft_labels: list[dict[str, str]]) ->
     return labels
 
 
+def row_vertical(row: dict[str, str], verticals: Any | None) -> str | None:
+    """The vertical of a dataset row, through its campaign id so a POS REPLY row takes its
+    parent's. None without a resolver."""
+    if verticals is None:
+        return None
+    raw = (row.get("campaign_id") or "").strip()
+    campaign_id = int(raw) if raw.isdigit() else None
+    return verticals.for_campaign(campaign_id, row.get("campaign_name") or "")
+
+
 def history_examples(
-    dataset: list[dict[str, str]], labels: dict[str, str]
+    dataset: list[dict[str, str]], labels: dict[str, str], verticals: Any | None = None
 ) -> tuple[list[NewExample], int]:
     """(examples, number of dataset rows skipped for a missing text or label)."""
     out: list[NewExample] = []
@@ -60,12 +71,15 @@ def history_examples(
                 gamic_reply=gamic,
                 campaign_name=row.get("campaign_name") or "",
                 replied_at=parse_time(row.get("first_reply_time")),
+                vertical=row_vertical(row, verticals),
             )
         )
     return out, skipped
 
 
-def load_history(data_dir: Path = DATA) -> tuple[list[NewExample], int]:
+def load_history(
+    data_dir: Path = DATA, verticals: Any | None = None
+) -> tuple[list[NewExample], int]:
     dataset = read_csv(data_dir / "gmc_all_replies_dataset.csv")
     labels = label_map(read_csv(data_dir / "gold_set.csv"), read_csv(data_dir / "draft_labels.csv"))
-    return history_examples(dataset, labels)
+    return history_examples(dataset, labels, verticals)

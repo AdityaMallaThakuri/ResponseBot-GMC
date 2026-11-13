@@ -24,12 +24,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("file", type=Path)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument(
+        "--vertical",
+        default="ma",
+        help="vertical of every template in the file (default ma: the GMC M&A SOP)",
+    )
     args = parser.parse_args()
 
     from app.examples.sop import sop_examples
+    from app.examples.verticals import VERTICALS
 
-    examples, unmatched = sop_examples(args.file.read_text(encoding="utf-8-sig"))
-    print(f"{len(examples)} templates ready")
+    if args.vertical not in VERTICALS:
+        raise SystemExit(f"unknown vertical {args.vertical!r}; use one of {', '.join(VERTICALS)}")
+    examples, unmatched = sop_examples(
+        args.file.read_text(encoding="utf-8-sig"), vertical=args.vertical
+    )
+    print(f"{len(examples)} templates ready (vertical: {args.vertical})")
     for e in examples:
         print(f"  [{e.label}] {e.prospect_reply[:70]}  ({len(e.gamic_reply.split())} words)")
     for heading in unmatched:

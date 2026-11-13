@@ -56,6 +56,7 @@ class Query(Protocol):
     def update(self, json: Row) -> "Query": ...
     def select(self, *columns: str) -> "Query": ...
     def eq(self, column: str, value: Any) -> "Query": ...
+    def neq(self, column: str, value: Any) -> "Query": ...
     def lte(self, column: str, value: Any) -> "Query": ...
     def order(self, column: str, *, desc: bool = False) -> "Query": ...
     def limit(self, size: int) -> "Query": ...
@@ -94,10 +95,13 @@ def _select(
     order: str | None = None,
     desc: bool = False,
     limit: int | None = None,
+    not_equal: dict[str, Any] | None = None,
 ) -> list[Row]:
     query = db.table(table).select("*")
     for column, value in (filters or {}).items():
         query = query.eq(column, value)
+    for column, value in (not_equal or {}).items():
+        query = query.neq(column, value)
     if order:
         query = query.order(order, desc=desc)
     if limit is not None:
@@ -395,20 +399,47 @@ def insert_example(db: Database, example: NewExample) -> InsertResult:
     return _insert_once(db, "reply_examples", to_row(example), EXAMPLE_KEY)
 
 
-def fetch_examples_for_label(db: Database, label: str, limit: int = 100) -> list[Row]:
-    """The newest examples with this label."""
+def _side(ma: bool | None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(equal, not-equal) filters for one side of the M&A line; none when ma is None."""
+    if ma is None:
+        return {}, {}
+    return ({"vertical": "ma"}, {}) if ma else ({}, {"vertical": "ma"})
+
+
+def fetch_examples_for_label(
+    db: Database, label: str, limit: int = 100, *, ma: bool | None = None
+) -> list[Row]:
+    """The newest examples with this label (only M&A ones, or only the others, if `ma` is set)."""
+    eq, neq = _side(ma)
     return _select(
-        db, "reply_examples", {"label": label}, order="replied_at", desc=True, limit=limit
+        db,
+        "reply_examples",
+        {"label": label, **eq},
+        order="replied_at",
+        desc=True,
+        limit=limit,
+        not_equal=neq,
     )
 
 
-def fetch_recent_examples(db: Database, limit: int = 300) -> list[Row]:
-    return _select(db, "reply_examples", {}, order="replied_at", desc=True, limit=limit)
+def fetch_recent_examples(db: Database, limit: int = 300, *, ma: bool | None = None) -> list[Row]:
+    eq, neq = _side(ma)
+    return _select(
+        db, "reply_examples", eq, order="replied_at", desc=True, limit=limit, not_equal=neq
+    )
 
 
 def fetch_all_examples(db: Database) -> list[Row]:
     """Every example (for the sync's "already in the library" check)."""
     return _select(db, "reply_examples", {}, order="created_at", desc=True)
+
+
+def update_example_vertical(db: Database, example_id: str, vertical: str) -> Row:
+    return _update(db, "reply_examples", example_id, {"vertical": vertical})
+
+
+def update_thread_vertical(db: Database, thread_id: str, vertical: str) -> Row:
+    return _update(db, "threads", thread_id, {"vertical": vertical})
 
 
 def find_example_for_draft(db: Database, draft_id: str) -> Row | None:

@@ -191,7 +191,10 @@ def drafter(
     model: FakeModel, pool: list[Example] | None = None, price_sentence: str = ""
 ) -> ExampleDrafter:
     return ExampleDrafter(
-        lambda label: pool if pool is not None else [ex(1), ex(2)], model, "m-x", price_sentence
+        lambda label, vertical="": pool if pool is not None else [ex(1), ex(2)],
+        model,
+        "m-x",
+        price_sentence,
     )
 
 
@@ -458,7 +461,7 @@ def make_deps(model: FakeModel | None = None, label: str = "info_request", conf:
         classifier=FakeClassifier(llm(label, conf)),
         slack=FakeSlack(),
         example_drafter=ExampleDrafter(
-            lambda lab: load_pool(db, lab),
+            lambda lab, vertical="": load_pool(db, lab, vertical),
             model or reply_with("Hey Pat, here is how it works in two steps."),
             "m-x",
         ),

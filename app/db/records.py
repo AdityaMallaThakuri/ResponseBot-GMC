@@ -224,6 +224,7 @@ class NewExample:
     draft_similarity: float | None = None  # 0 to 100: our draft against what Ray sent
     sent_at: datetime | None = None  # when Gamic's reply was sent
     priority: int = 0  # higher wins within a label (SOP templates)
+    vertical: str | None = None  # ma, lenders, ... (None: the database default, 'unknown')
 
 
 @dataclass(frozen=True)

@@ -22,6 +22,7 @@ class FakeQuery:
         self._on_conflict: list[str] = []
         self._ignore = False
         self._eq: list[tuple[str, Any]] = []
+        self._neq: list[tuple[str, Any]] = []
         self._lte: list[tuple[str, Any]] = []
         self._order: tuple[str, bool] | None = None
         self._limit: int | None = None
@@ -50,6 +51,10 @@ class FakeQuery:
         self._eq.append((column, value))
         return self
 
+    def neq(self, column: str, value: Any) -> "FakeQuery":
+        self._neq.append((column, value))
+        return self
+
     def lte(self, column: str, value: Any) -> "FakeQuery":
         self._lte.append((column, value))
         return self
@@ -68,8 +73,10 @@ class FakeQuery:
         return row
 
     def _matches(self, row: Row) -> bool:
-        return all(row.get(c) == v for c, v in self._eq) and all(
-            row.get(c) is not None and row[c] <= v for c, v in self._lte
+        return (
+            all(row.get(c) == v for c, v in self._eq)
+            and all(row.get(c) != v for c, v in self._neq)
+            and all(row.get(c) is not None and row[c] <= v for c, v in self._lte)
         )
 
     def execute(self) -> FakeResponse:

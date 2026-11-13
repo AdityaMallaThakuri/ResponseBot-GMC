@@ -75,20 +75,25 @@ def build(settings: Any) -> IngestDeps:
     from app.db.connect import create_db
     from app.examples.drafter import ExampleDrafter
     from app.examples.library import load_pool
+    from app.examples.verticals import VerticalResolver
     from app.ingest.deps import IngestConfig
+    from app.smartlead.client import SmartleadClient
 
     claude = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, max_retries=5)
     db = create_db(settings)
+    verticals = VerticalResolver(SmartleadClient.from_settings(settings).list_campaigns)
     return IngestDeps(
         db=db,
         smartlead=NoSmartlead(),
+        verticals=verticals,
         classifier=Classifier(claude, settings.CLASSIFIER_MODEL),
         slack=WebClient(token=settings.SLACK_BOT_TOKEN),
         example_drafter=ExampleDrafter(
-            lambda label: load_pool(db, label),
+            lambda label, vertical="": load_pool(db, label, vertical),
             claude,
             settings.DRAFT_MODEL,
             settings.PRICE_SENTENCE,
+            vertical_of=verticals.for_thread,
         ),
         config=IngestConfig.from_settings(settings),
     )

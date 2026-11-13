@@ -1,0 +1,39 @@
+# Which vertical a campaign belongs to. Used to keep M&A examples and SOP templates away from
+# every other kind of campaign. Corrections are data: edit here, not in code.
+#
+# How a campaign is placed (app/examples/verticals.py):
+#   1. A child campaign (POS REPLY, No-Show) takes its root parent's name and id first.
+#   2. campaign_ids: an exact id wins.
+#   3. overrides: a case-insensitive "contains" on the name wins next.
+#   4. rules: the first rule with a matching regex (case-insensitive) wins; order matters.
+#   5. Nothing matches: "unknown", which counts as NOT M&A.
+# The hard line is M&A against everything else. The other verticals only affect ranking.
+
+campaign_ids: {}
+
+overrides:
+  # Checked 2026-11-13 against the campaign copy.
+  - {contains: "warm re-engage", vertical: ma}
+  - {contains: "finance google", vertical: ma}
+  - {contains: "finance ms", vertical: ma}
+  - {contains: "frd lookalike", vertical: marketing}
+  - {contains: "competitor engagement monitor", vertical: marketing}
+  - {contains: "inven usa test", vertical: unknown}
+  - {contains: "austin meet (m&a)", vertical: ma}
+  - {contains: "austin meet (marketing)", vertical: marketing}
+
+rules:
+  - vertical: lenders
+    patterns: ['capital advisory', 'capital raise', 'commercial lending', '\blenders?\b']
+  - vertical: marketing
+    patterns: ['\bmarketing\b', 'mass lead magnet', '\bvideo\b']
+  - vertical: solar
+    patterns: ['\bsolar\b']
+  - vertical: facilities
+    patterns: ['\bfacilities\b']
+  - vertical: relocation
+    patterns: ['relocation', '\bhvac\b', '\broofing\b']
+  - vertical: ma
+    patterns: ['\bm&a\b', '\bma\b', '\bpe\b', '\bib\b', '\bimpl\b', '\bacquirers?\b']
+  - vertical: other
+    patterns: ['\baccounting\b', 'fractional cfo', 'commercial real estate', '\bfranchisors?\b', '\bmeddev\b']

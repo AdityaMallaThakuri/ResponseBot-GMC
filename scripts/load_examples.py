@@ -23,19 +23,25 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
+    from app.config.settings import get_settings
     from app.examples.history import load_history
+    from app.examples.verticals import VerticalResolver
+    from app.smartlead.client import SmartleadClient
 
-    examples, skipped = load_history()
+    # Read only: the campaign list gives each POS REPLY row its parent's vertical.
+    verticals = VerticalResolver(SmartleadClient.from_settings(get_settings()).list_campaigns)
+    examples, skipped = load_history(verticals=verticals)
     print(
         f"{len(examples)} examples ready, "
         f"{skipped} dataset rows skipped (no reply, response or label)"
     )
     for label, n in Counter(e.label for e in examples).most_common():
         print(f"  {n:4d}  {label}")
+    for vertical, n in Counter(e.vertical for e in examples).most_common():
+        print(f"  vertical {vertical}: {n}")
     if args.dry_run:
         return
 
-    from app.config.settings import get_settings
     from app.db.client import insert_example
     from app.db.connect import create_db
 

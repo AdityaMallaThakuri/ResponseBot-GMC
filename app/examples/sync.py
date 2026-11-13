@@ -100,6 +100,7 @@ def sync_examples(
     min_confidence: float = 0.75,
     max_threads: int | None = None,
     progress: Callable[[str], None] | None = None,
+    verticals: Any | None = None,
 ) -> SyncResult:
     """Read the inbox of every campaign and return the new pairs. Never writes anywhere.
 
@@ -178,6 +179,9 @@ def sync_examples(
                 campaign_name=campaign_name,
                 replied_at=reply.timestamp,
                 sent_at=sent.timestamp,
+                vertical=(
+                    verticals.for_campaign(campaign_id, campaign_name) if verticals else None
+                ),
             )
         )
 
@@ -238,6 +242,7 @@ def sync_once(deps: Any, settings: Any) -> SyncResult:
         ids,
         replies,
         min_confidence=settings.CLASSIFIER_MIN_CONFIDENCE,
+        verticals=getattr(deps, "verticals", None),
     )
     result.stored = store_pairs(deps.db, result.pairs)
     logger.info(

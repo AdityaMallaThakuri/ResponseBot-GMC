@@ -109,6 +109,11 @@ def _when(message: Message) -> datetime:
     return message.timestamp
 
 
+def _vertical(deps: Any, thread: dict[str, Any]) -> str | None:
+    resolver = getattr(deps, "verticals", None)
+    return resolver.for_thread(thread) if resolver else (thread.get("vertical") or None)
+
+
 def learn_from_draft(
     deps: Any, draft: dict[str, Any], sequence_for: Callable[[int], list[str]] | None = None
 ) -> tuple[bool, int]:
@@ -147,6 +152,7 @@ def learn_from_draft(
             thread_id=thread["id"],
             draft_id=draft["id"],
             draft_similarity=similarity(shown, sent.text),
+            vertical=_vertical(deps, thread),
         ),
     )
     return True, skipped

@@ -32,6 +32,7 @@ from typing import Any
 
 from app.classify.classifier import mask
 from app.examples.library import Example, select_examples
+from app.examples.verticals import is_ma
 
 logger = logging.getLogger(__name__)
 
@@ -322,16 +323,19 @@ def build_user_message(
 
 
 class ExampleDrafter:
-    """`load_pool(label)` returns the candidate examples; `client` is an Anthropic client."""
+    """`load_pool(label, vertical=...)` returns the candidate examples; `client` is an Anthropic
+    client; `vertical_of(thread)` gives the thread's vertical (M&A or not decides the pool)."""
 
     def __init__(
         self,
-        load_pool: Callable[[str], list[Example]],
+        load_pool: Callable[..., list[Example]],
         client: Any,
         model: str,
         price_sentence: str = "",
+        vertical_of: Callable[[dict[str, Any]], str] | None = None,
     ) -> None:
         self.load_pool = load_pool
+        self.vertical_of = vertical_of
         self.client = client
         self.model = model
         self.price_sentence = price_sentence.strip()  # PRICE_SENTENCE, inserted word for word
@@ -369,9 +373,17 @@ class ExampleDrafter:
                 f"confidence_below_draft_threshold:{confidence:.2f}<{min_confidence:.2f}",
             )
         campaign = str(thread.get("campaign_name") or "")
-        pool = self.load_pool(label)
+        vertical = (
+            self.vertical_of(thread) if self.vertical_of else str(thread.get("vertical") or "")
+        )
+        pool = self.load_pool(label, vertical=vertical)
         examples = select_examples(
-            pool, label, campaign, exclude_thread_id=exclude_thread_id, reply=reply
+            pool,
+            label,
+            campaign,
+            exclude_thread_id=exclude_thread_id,
+            reply=reply,
+            vertical=vertical,
         )
         if not examples:
             return ExampleOutcome("no_draft", f"no examples to draft from for {label}")
@@ -380,7 +392,12 @@ class ExampleDrafter:
             if self.price_sentence:
                 sentence, confirmed = self.price_sentence, True
             else:
-                library = [*self.load_pool("price_question"), *self.load_pool("price_and_info")]
+                library = [
+                    e
+                    for price_label in ("price_question", "price_and_info")
+                    for e in self.load_pool(price_label, vertical=vertical)
+                    if is_ma(e.vertical) == is_ma(vertical)
+                ]
                 sentence, confirmed = latest_price_sentence(library, exclude_thread_id), False
         first_name = str(thread.get("lead_first_name") or "")
         user = build_user_message(

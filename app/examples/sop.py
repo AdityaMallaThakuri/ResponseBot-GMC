@@ -89,7 +89,9 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:80]
 
 
-def sop_examples(text: str, now: datetime | None = None) -> tuple[list[NewExample], list[str]]:
+def sop_examples(
+    text: str, now: datetime | None = None, vertical: str = "ma"
+) -> tuple[list[NewExample], list[str]]:
     """(examples, headings that matched no label). Each example has priority SOP_PRIORITY."""
     now = now or datetime.now(UTC)
     labels = valid_labels()
@@ -111,6 +113,7 @@ def sop_examples(text: str, now: datetime | None = None) -> tuple[list[NewExampl
                 replied_at=now,
                 sent_at=now,
                 priority=SOP_PRIORITY,
+                vertical=vertical,
             )
         )
     return examples, unmatched

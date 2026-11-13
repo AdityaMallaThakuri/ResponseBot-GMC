@@ -55,6 +55,8 @@ class IngestDeps:
     example_drafter: Any | None = None
     # Decides which campaigns are watched (app.smartlead.watch.CampaignWatcher); built on first use.
     watcher: Any | None = None
+    # app.examples.verticals.VerticalResolver: sets threads.vertical and example verticals.
+    verticals: Any | None = None
     config: IngestConfig = field(default_factory=IngestConfig)
 
 
@@ -67,20 +69,25 @@ def build_deps(settings: Settings) -> IngestDeps:
     from app.db.connect import create_db
     from app.examples.drafter import ExampleDrafter
     from app.examples.library import load_pool
+    from app.examples.verticals import VerticalResolver
     from app.smartlead.client import SmartleadClient
 
     claude = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, max_retries=5)
     db = create_db(settings)
+    smartlead = SmartleadClient.from_settings(settings)
+    verticals = VerticalResolver(smartlead.list_campaigns)
     return IngestDeps(
         db=db,
-        smartlead=SmartleadClient.from_settings(settings),
+        smartlead=smartlead,
+        verticals=verticals,
         classifier=Classifier(claude, settings.CLASSIFIER_MODEL),
         slack=WebClient(token=settings.SLACK_BOT_TOKEN),
         example_drafter=ExampleDrafter(
-            lambda label: load_pool(db, label),
+            lambda label, vertical="": load_pool(db, label, vertical),
             claude,
             settings.DRAFT_MODEL,
             settings.PRICE_SENTENCE,
+            vertical_of=verticals.for_thread,
         ),
         config=IngestConfig.from_settings(settings),
     )

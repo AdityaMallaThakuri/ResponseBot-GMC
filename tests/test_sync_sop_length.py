@@ -74,7 +74,7 @@ THREAD = {"campaign_name": "GMC - M&A May", "lead_first_name": "Pat"}
 
 
 def run_draft(model: FakeModel, pool: list[Example]):
-    drafter = ExampleDrafter(lambda label: pool, model, "m-x")
+    drafter = ExampleDrafter(lambda label, vertical="": pool, model, "m-x")
     return drafter.draft(
         thread=THREAD,
         label="info_request",

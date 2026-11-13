@@ -42,6 +42,7 @@ def main() -> None:
         store_pairs,
         sync_examples,
     )
+    from app.examples.verticals import VerticalResolver
     from app.smartlead.client import SmartleadClient
     from app.smartlead.watch import watched_campaigns
 
@@ -82,6 +83,7 @@ def main() -> None:
         min_confidence=settings.CLASSIFIER_MIN_CONFIDENCE,
         max_threads=args.max_threads,
         progress=lambda line: print("  " + line, flush=True),
+        verticals=VerticalResolver(smartlead.list_campaigns),
     )
 
     print(
@@ -109,6 +111,7 @@ def main() -> None:
         rows = [
             {
                 "source_thread_id": p.source_thread_id,
+                "vertical": p.vertical,
                 "label": p.label,
                 "campaign_name": p.campaign_name,
                 "prospect_reply": p.prospect_reply,

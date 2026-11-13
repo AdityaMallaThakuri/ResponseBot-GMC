@@ -8,6 +8,10 @@ Selection (select_examples): the 5 closest, ordered by same label first, then pr
 templates), then sent in the last RECENT_DAYS days (Ray's current style wins), then same campaign
 family, then similarity of the prospect's reply to the new one, then most recent. The family is
 the first word after "GMC - " ("M&A" for "GMC - M&A June (US/Canada)").
+
+Vertical (app/examples/verticals.py): only examples on the same side of the M&A line are eligible,
+so an M&A example or SOP template never reaches a campaign that is not M&A, and the other way
+round. Among the eligible ones, the same vertical ranks right after the label.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from typing import Any
 
 from app.db.client import Database, fetch_examples_for_label, fetch_recent_examples
 from app.examples.similarity import similarity
+from app.examples.verticals import is_ma
 
 K_EXAMPLES = 5
 RECENT_DAYS = 60
@@ -38,6 +43,7 @@ class Example:
     replied_at: datetime | None = None
     sent_at: datetime | None = None
     priority: int = 0
+    vertical: str = ""  # "" or "unknown" counts as not M&A
 
     @property
     def when(self) -> datetime:
@@ -60,15 +66,25 @@ def select_examples(
     exclude_thread_id: str | None = None,
     reply: str = "",
     now: datetime | None = None,
+    vertical: str = "",
 ) -> list[Example]:
     """The k closest examples (see the module docstring for the order)."""
     family = campaign_family(campaign_name)
     cutoff = (now or datetime.now(UTC)) - timedelta(days=RECENT_DAYS)
 
-    def closeness(ex: Example) -> tuple[bool, int, bool, bool, float, datetime]:
+    def closeness(ex: Example) -> tuple[bool, bool, int, bool, bool, float, datetime]:
         same_family = bool(family) and campaign_family(ex.campaign_name) == family
+        same_vertical = bool(vertical) and ex.vertical == vertical
         close = similarity(reply, ex.prospect_reply) if reply else 0.0
-        return (ex.label == label, ex.priority, ex.when >= cutoff, same_family, close, ex.when)
+        return (
+            ex.label == label,
+            same_vertical,
+            ex.priority,
+            ex.when >= cutoff,
+            same_family,
+            close,
+            ex.when,
+        )
 
     usable = [
         ex
@@ -76,6 +92,7 @@ def select_examples(
         if ex.gamic_reply.strip()
         and ex.prospect_reply.strip()
         and ex.source_thread_id != exclude_thread_id
+        and is_ma(ex.vertical) == is_ma(vertical)
     ]
     return sorted(usable, key=closeness, reverse=True)[:k]
 
@@ -108,10 +125,19 @@ def example_from_row(row: dict[str, Any]) -> Example:
         replied_at=parse_time(row.get("replied_at")),
         sent_at=parse_time(row.get("sent_at")),
         priority=int(row.get("priority") or 0),
+        vertical=str(row.get("vertical") or ""),
     )
 
 
-def load_pool(db: Database, label: str) -> list[Example]:
-    """Candidates for a new reply: the newest examples of its label plus the newest overall."""
-    rows = {r["id"]: r for r in [*fetch_examples_for_label(db, label), *fetch_recent_examples(db)]}
+def load_pool(db: Database, label: str, vertical: str = "") -> list[Example]:
+    """Candidates for a new reply: the newest examples of its label plus the newest overall, only
+    from the same side of the M&A line as `vertical`."""
+    ma = is_ma(vertical)
+    rows = {
+        r["id"]: r
+        for r in [
+            *fetch_examples_for_label(db, label, ma=ma),
+            *fetch_recent_examples(db, ma=ma),
+        ]
+    }
     return [example_from_row(r) for r in rows.values()]
