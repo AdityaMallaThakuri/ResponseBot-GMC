@@ -1,0 +1,13 @@
+# The only links a draft may carry. Every other link stays the placeholder [LINK].
+# Source: the header of Ray's SOP file (sop_gmc.md). Read by app/examples/links.py.
+#
+# calendar:    filled wherever a draft line says "grab a time" or "my calendar", for every vertical.
+# lead_magnet: filled on the resource line of a draft for one of `labels`, and only on a campaign
+#              whose vertical is in `verticals`. It never appears anywhere else.
+
+calendar: https://calendly.com/gamicmedia/one-one
+
+lead_magnet:
+  url: https://gamma.app/docs/61-Leads-In-20-Days-e6ddtp51jograal
+  labels: [lead_magnet_request]
+  verticals: [ma]
