@@ -45,20 +45,8 @@ def card(**over: Any) -> ReplyCard:
     return ReplyCard(**{**base, **over})
 
 
-def test_a_live_card_has_no_actually_sent_section() -> None:
+def test_a_card_never_has_an_actually_sent_section_inside_it() -> None:
     assert "actually sent" not in str(build_reply_card_blocks(card()))
-
-
-def test_the_script_card_shows_what_we_actually_sent_first_600_characters() -> None:
-    blocks = build_reply_card_blocks(card(actually_sent="Hi Pat, " + "x" * 700))
-    assert blocks[-2]["type"] == "divider"  # a small section at the bottom
-    text = blocks[-1]["elements"][0]["text"]
-    assert text.startswith("*What we actually sent:* Hi Pat,") and text.count("x") <= 600
-
-
-def test_a_notice_card_can_show_it_too() -> None:
-    blocks = build_reply_card_blocks(card(lane="human_only", draft_text=None, actually_sent="Hi"))
-    assert "What we actually sent:" in str(blocks)
 
 
 def test_our_answer_that_is_not_a_sequence_step_is_found() -> None:

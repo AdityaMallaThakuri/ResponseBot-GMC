@@ -6,7 +6,7 @@ from typing import Any
 from slack_sdk import WebClient
 
 from app.config.settings import get_settings
-from app.slack.quote import clean_quote, ooo_until, referral_name
+from app.slack.quote import clean_quote
 
 APPROVE = "reply_approve"
 EDIT = "reply_edit"
@@ -142,12 +142,8 @@ class ReplyCard:
     draft_notes: tuple[str, ...] = ()
     thread_url: str | None = None  # opens the thread in Smartlead's master inbox
     low_confidence: bool = False  # the label's confidence is below the classifier minimum
-    # Only scripts/post_replies.py sets this (a reply already sent for an old thread). A live
-    # card never has it.
-    actually_sent: str | None = None
 
 
-SENT_LIMIT = 600  # characters of "What we actually sent"
 DRAFT_LIMIT = 2800  # a Slack section holds 3000 characters
 SMARTLEAD_THREAD_URL = "https://app.smartlead.ai/app/master-inbox?action=INBOX&leadMap={}"
 
@@ -212,16 +208,16 @@ def feedback_resolved_blocks(original: list[Block], user_id: str, action_id: str
         links = [e for e in block.get("elements", []) if e.get("action_id") == OPEN_THREAD]
         if links:
             kept.append({"type": "actions", "block_id": OPEN_BLOCK_ID, "elements": links})
+    closing = [kept.pop()] if kept and kept[-1].get("type") == "divider" else []
     note = f"<@{user_id}> {FEEDBACK_TEXT[action_id]}"
-    return [*kept, {"type": "context", "elements": [{"type": "mrkdwn", "text": note}]}]
+    return [*kept, {"type": "context", "elements": [{"type": "mrkdwn", "text": note}]}, *closing]
 
 
-LOW_CONFIDENCE_LINE = "Low confidence: check the label"
 RAY_LINE = "Ray to write this one"
 OPEN_THREAD = "open_thread"  # the "Open in Smartlead" button (a URL button; clicking only opens it)
 OPEN_BLOCK_ID = "open_thread_actions"
 
-# Replies nobody needs to answer: one line each, with a small Open button.
+# Replies nobody needs to answer: they are listed in the daily summary, never as a card.
 NOTICE_LABELS = frozenset(
     {"out_of_office", "auto_reply_or_bounce", "do_not_contact", "not_interested", "wrong_person"}
 )
@@ -232,7 +228,7 @@ def label_words(label: str | None) -> str:
 
 
 def card_kind(card: ReplyCard) -> str:
-    """ "notice" (one line, no action), "draft" (a draft to copy) or "human" (Ray writes it)."""
+    """ "notice" (no action: daily summary), "draft" (copy it) or "human" (Ray writes it)."""
     if card.label in NOTICE_LABELS:
         return "notice"
     return "draft" if card.draft_text is not None else "human"
@@ -245,37 +241,6 @@ def open_button(url: str) -> Block:
         "text": {"type": "plain_text", "text": "Open in Smartlead"},
         "url": url,
     }
-
-
-def notice_line(card: ReplyCard) -> str:
-    """The single line of a no-action card, for example
-    "🔕 *Rob Example* · out of office until Nov 30 · PAVING RELOCATION 27/10"."""
-    who = f"*{escape_mrkdwn(card.lead_name)}*"
-    if card.label == "out_of_office":
-        until = ooo_until(card.reply)
-        icon, what = "🔕", "out of office" + (f" until {until}" if until else "")
-    elif card.label == "auto_reply_or_bounce":
-        icon, what = "🤖", "automatic reply or bounce"
-    elif card.label == "do_not_contact":
-        icon, what = "⛔", "unsubscribe: do not reply"
-    elif card.label == "not_interested":
-        icon = "👋"
-        what = (
-            "not interested, suggest: close" if card.note == "suggest: close" else "not interested"
-        )
-    else:  # wrong_person
-        referral = referral_name(card.reply)
-        icon, what = "↪️", "wrong person" + (f", try {referral}" if referral else "")
-    if card.low_confidence:
-        what += ", low confidence: check the label"
-    return f"{icon} {who} · {escape_mrkdwn(what)} · {escape_mrkdwn(card.campaign)}"
-
-
-def _notice_blocks(card: ReplyCard) -> list[Block]:
-    block: Block = {"type": "section", "text": {"type": "mrkdwn", "text": notice_line(card)}}
-    if card.thread_url:
-        block["accessory"] = open_button(card.thread_url)
-    return [block]
 
 
 def _quote_block(reply: str) -> Block:
@@ -293,16 +258,27 @@ def _small(text: str) -> Block:
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}
 
 
+HEADER_LIMIT = 150  # a Slack header block holds 150 characters
+DIVIDER: Block = {"type": "divider"}
+
+
+def _header(card: ReplyCard) -> Block:
+    text = f"{card.lead_name} — {card.campaign}"
+    if len(text) > HEADER_LIMIT:
+        text = text[: HEADER_LIMIT - 1] + "…"
+    return {"type": "header", "text": {"type": "plain_text", "text": text, "emoji": False}}
+
+
 def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
+    """The card for the draft channel: a draft to copy, or "Ray to write this one".
+
+    Replies nobody needs to answer never get a card: they go to the daily summary
+    (app/slack/digest.py)."""
     if card_kind(card) == "notice":
-        return _notice_blocks(card)
-    title = " · ".join(
-        escape_mrkdwn(part) for part in (card.lead_name, card.campaign, label_words(card.label))
-    )
-    blocks: list[Block] = [
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"*{title}*"}},
-        _quote_block(card.reply),
-    ]
+        raise ValueError(f"{card.label} replies go to the daily summary, not to a card")
+    context = label_words(card.label) + (" · low confidence" if card.low_confidence else "")
+    blocks: list[Block] = [_header(card), _small(escape_mrkdwn(context))]
+    blocks += [_quote_block(card.reply), DIVIDER]
     if card.draft_text is not None:
         blocks.append(
             {"type": "section", "text": {"type": "mrkdwn", "text": code_block(card.draft_text)}}
@@ -313,8 +289,6 @@ def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
     warnings = list(card.draft_notes)
     if card.draft_flags:
         warnings.append("Check these figures: " + ", ".join(card.draft_flags))
-    if card.low_confidence:
-        warnings.insert(0, LOW_CONFIDENCE_LINE)
     if warnings:
         blocks.append(_small(":warning: " + " · ".join(escape_mrkdwn(w) for w in warnings)))
     buttons: list[Block] = [open_button(card.thread_url)] if card.thread_url else []
@@ -322,12 +296,16 @@ def build_reply_card_blocks(card: ReplyCard) -> list[Block]:
         blocks.append(feedback_actions(card.thread_ref, buttons))
     elif buttons:
         blocks.append({"type": "actions", "block_id": OPEN_BLOCK_ID, "elements": buttons})
-    if card.actually_sent:
-        sent = " ".join(card.actually_sent.split())
-        shown = sent if len(sent) <= SENT_LIMIT else sent[: SENT_LIMIT - 1] + "…"
-        blocks.append({"type": "divider"})
-        blocks.append(_small(f"*What we actually sent:* {escape_mrkdwn(shown)}"))
+    blocks.append(DIVIDER)
     return blocks
+
+
+def actually_sent_blocks(text: str) -> list[Block]:
+    """ "What we actually sent", for the thread reply under a card (scripts/post_replies.py)."""
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "*What we actually sent*"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": code_block(text.strip())}},
+    ]
 
 
 def reply_fallback_text(card: ReplyCard) -> str:

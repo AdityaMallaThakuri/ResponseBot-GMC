@@ -271,6 +271,11 @@ def fetch_slack_cards(db: Database, thread_id: str) -> list[Row]:
     return _select(db, "slack_cards", {"thread_id": thread_id}, order="created_at")
 
 
+def fetch_pending_digest_cards(db: Database, channel: str) -> list[Row]:
+    """The no-action replies waiting for the daily summary, oldest first."""
+    return _select(db, "slack_cards", {"channel": channel, "status": "pending"}, order="created_at")
+
+
 def update_slack_card(db: Database, card_id: str, values: Row) -> Row:
     return _update(db, "slack_cards", card_id, values)
 

@@ -207,7 +207,7 @@ def test_a_rule_result_is_stored_with_its_rule_name() -> None:
     assert (row["rule_hit"], row["model"], row["confidence"]) == ("unsubscribe", "rules", 1.0)
 
 
-def test_do_not_contact_records_would_suppress_and_posts_a_notice_but_calls_nothing() -> None:
+def test_do_not_contact_records_would_suppress_and_waits_for_the_summary() -> None:
     db, slack, smartlead = FakeDb(), FakeSlack(), FakeSmartlead()
     result = Classification(
         "do_not_contact", 1.0, "rule: asks to unsubscribe", "rule", rule_hit="unsubscribe"
@@ -222,44 +222,37 @@ def test_do_not_contact_records_would_suppress_and_posts_a_notice_but_calls_noth
     assert (
         action["details"]["label"] == "do_not_contact" and action["details"]["scope"] == "campaign"
     )
-    (post_,) = slack.posts
-    text = all_text(post_["blocks"])
-    assert "unsubscribe: do not reply" in text
-    assert "actions" not in [b["type"] for b in post_["blocks"]]
-    assert rows(db, "slack_cards")[0]["lane"] == "auto_action"
+    assert slack.posts == []  # never in the draft channel
+    (card,) = rows(db, "slack_cards")
+    assert (card["lane"], card["channel"], card["status"]) == ("auto_action", "digest", "pending")
+    assert card.get("slack_ts") is None
     assert len(smartlead.thread_calls) == 1  # only C1's read of the thread
 
 
-def test_not_interested_posts_a_notice_with_suggest_close_and_no_action() -> None:
-    db, slack = FakeDb(), FakeSlack()
-    run(make_deps(db, FakeClassifier(llm("not_interested", 0.95, "A polite decline.")), slack))
-    text = all_text(slack.posts[0]["blocks"])
-    assert "suggest: close" in text
-    assert "actions" not in [b["type"] for b in slack.posts[0]["blocks"]]
-    assert not rows(db, "actions") and not rows(db, "drafts")
-    assert rows(db, "slack_cards")[0]["lane"] == "human_only"
-
-
-def test_not_interested_below_0_90_has_no_close_suggestion() -> None:
-    slack = FakeSlack()
-    run(make_deps(FakeDb(), FakeClassifier(llm("not_interested", 0.85)), slack))
-    assert "suggest: close" not in all_text(slack.posts[0]["blocks"])
-    assert "not interested" in all_text(slack.posts[0]["blocks"])
-
-
 @pytest.mark.parametrize(
-    "label", ["out_of_office", "wrong_person", "auto_reply_or_bounce", "off_script"]
-)
-def test_notice_only_labels_post_a_human_only_notice(label: str) -> None:
+    ("label", "confidence"),
+    [("not_interested", 0.95), ("not_interested", 0.85), ("out_of_office", 0.95),
+     ("wrong_person", 0.95), ("auto_reply_or_bounce", 0.95), ("do_not_contact", 0.6)],
+)  # fmt: skip
+def test_replies_nobody_answers_post_no_card_and_wait_for_the_summary(
+    label: str, confidence: float
+) -> None:
     db, slack = FakeDb(), FakeSlack()
-    run(make_deps(db, FakeClassifier(llm(label, 0.95)), slack))
+    run(make_deps(db, FakeClassifier(llm(label, confidence)), slack))
+    assert slack.posts == []
+    (card,) = rows(db, "slack_cards")
+    assert (card["lane"], card["channel"], card["status"]) == ("human_only", "digest", "pending")
+    assert not rows(db, "drafts") and not [
+        a for a in rows(db, "actions") if a["type"] != "would_suppress"
+    ]
+
+
+def test_off_script_still_gets_a_ray_to_write_card() -> None:
+    db, slack = FakeDb(), FakeSlack()
+    run(make_deps(db, FakeClassifier(llm("off_script", 0.95)), slack))
     blocks = slack.posts[0]["blocks"]
-    assert "draft_good" not in all_text(blocks) and "Draft reply" not in all_text(blocks)
-    if label == "off_script":
-        assert "Ray to write this one" in all_text(blocks)
-    else:
-        assert len(blocks) == 1 and "actions" not in [b["type"] for b in blocks]
-    assert not rows(db, "actions")
+    assert "Ray to write this one" in all_text(blocks) and "draft_good" not in all_text(blocks)
+    assert rows(db, "slack_cards")[0]["status"] == "posted"
 
 
 def test_low_confidence_goes_to_a_human_with_no_buttons() -> None:
@@ -267,7 +260,7 @@ def test_low_confidence_goes_to_a_human_with_no_buttons() -> None:
     run(make_deps(FakeDb(), FakeClassifier(llm("info_request", 0.6)), slack))
     blocks = slack.posts[0]["blocks"]
     assert "Ray to write this one" in all_text(blocks)
-    assert "Low confidence: check the label" in all_text(blocks)
+    assert "low confidence" in all_text(blocks)
     assert "draft_good" not in all_text(blocks)
 
 
@@ -329,7 +322,8 @@ def test_cards_go_to_the_channel_for_their_lane_and_the_card_row_keeps_the_chann
     assert (card["channel"], card["slack_ts"], card["status"]) == ("C0TEST", "1000.1", "posted")
     db2, slack2 = FakeDb(), FakeSlack()
     run(make_deps(db2, FakeClassifier(llm("out_of_office", 0.9)), slack2, config=cfg))
-    assert slack2.posts[0]["channel"] == "alerts"
+    assert slack2.posts == []  # no card anywhere: the alert channel only gets the daily summary
+    assert cfg.channel_for_kind("notice") is None and cfg.channel_for_kind("draft") == "drafts"
 
 
 def test_no_channel_configured_leaves_the_event_for_a_retry() -> None:
@@ -439,16 +433,16 @@ def test_a_slack_failure_keeps_the_event_and_a_retry_posts_once_without_reclassi
     assert rows(db, "raw_events")[0]["processed"] is True
 
 
-def test_a_retry_after_the_action_was_recorded_does_not_record_it_twice() -> None:
-    db, slack = FakeDb(), FakeSlack(fail=True)
+def test_a_retry_does_not_record_the_action_or_the_summary_row_twice() -> None:
+    db, slack = FakeDb(), FakeSlack()
     result = Classification(
         "do_not_contact", 1.0, "rule: asks to unsubscribe", "rule", rule_hit="unsubscribe"
     )
     deps = make_deps(db, FakeClassifier(result), slack)
     run(deps)
-    slack.fail = False
     process_reply_event(deps, "e1", EVENT)
-    assert len(rows(db, "actions")) == 1 and len(slack.posts) == 1
+    assert len(rows(db, "actions")) == 1 and len(rows(db, "slack_cards")) == 1
+    assert slack.posts == []
 
 
 # ------------------------------------------------------------------ clicks only record

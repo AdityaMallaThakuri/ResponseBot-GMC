@@ -38,7 +38,15 @@ from app.db.records import (
 )
 from app.ingest.deps import IngestDeps
 from app.ingest.draft_step import DraftView, draft_enabled, prepare_draft
-from app.slack.card import ReplyCard, card_kind, post_reply_card, smartlead_thread_url
+from app.slack.card import (
+    NO_UNFURL,
+    ReplyCard,
+    actually_sent_blocks,
+    card_kind,
+    post_reply_card,
+    smartlead_thread_url,
+)
+from app.slack.digest import DIGEST_CHANNEL
 from app.smartlead.models import Direction, Message
 
 logger = logging.getLogger(__name__)
@@ -123,7 +131,6 @@ def _card(
     result: Classification | None,
     plan: Route,
     view: DraftView | None = None,
-    actually_sent: str | None = None,
     low_confidence: bool = False,
 ) -> ReplyCard:
     return ReplyCard(
@@ -142,7 +149,6 @@ def _card(
         draft_notes=(view.notes if view else ())
         + (() if result is not None else ("Classifier error: check the thread",)),
         thread_url=smartlead_thread_url(thread.get("email_lead_map_id")),
-        actually_sent=actually_sent,
         low_confidence=low_confidence,
     )
 
@@ -192,21 +198,32 @@ def handle_first_reply(
             deps, thread, classification_id, result, first, outreach, plan
         )
 
-    sent = deps.actually_sent(thread, stored) if deps.actually_sent else None
     low = result is not None and result.confidence < cfg.min_confidence
-    card = _card(thread, payload, first, result, plan, view, sent, low)
-    channel = cfg.channel_for_kind(card_kind(card))
+    card = _card(thread, payload, first, result, plan, view, low)
+    kind = card_kind(card)
+    if kind == "notice":
+        # Nobody has to answer: no card. The row waits for the daily summary (app/slack/digest.py).
+        insert_slack_card(
+            deps.db,
+            NewSlackCard(
+                thread_id=thread["id"],
+                lane=CardLane.AUTO_ACTION
+                if plan.lane == LANE_WOULD_SUPPRESS
+                else CardLane.HUMAN_ONLY,
+                channel=DIGEST_CHANNEL,
+                status=CardStatus.PENDING,
+            ),
+        )
+        logger.info("thread %s classified, listed for the daily summary", thread["id"])
+        return True
+    channel = cfg.channel_for_kind(kind)
     if not channel:
         raise StepError(
             "no Slack channel configured: set SLACK_DRAFT_CHANNEL (SLACK_ALERT_CHANNEL is optional)"
         )
     ts, channel_id = post_reply_card(deps.slack, channel, card)
-    if plan.lane == LANE_WOULD_SUPPRESS:
-        db_lane = CardLane.AUTO_ACTION
-    elif plan.lane == LANE_DRAFT and draft_id:
-        db_lane = CardLane.DRAFT  # the table requires a draft_id for lane 'draft'
-    else:
-        db_lane = CardLane.HUMAN_ONLY  # including a draft lane card with no draft (C2 behaviour)
+    # the table requires a draft_id for lane 'draft'; a draft-lane card with no draft is human_only
+    db_lane = CardLane.DRAFT if plan.lane == LANE_DRAFT and draft_id else CardLane.HUMAN_ONLY
     insert_slack_card(
         deps.db,
         NewSlackCard(
@@ -218,8 +235,26 @@ def handle_first_reply(
             status=CardStatus.POSTED,
         ),
     )
+    sent = deps.actually_sent(thread, stored) if deps.actually_sent else None
+    if sent:
+        _post_actually_sent(deps, channel_id, ts, sent)  # only scripts/post_replies.py sets this
     logger.info("thread %s classified and posted: lane %s", thread["id"], plan.lane)
     return True
+
+
+def _post_actually_sent(deps: IngestDeps, channel: str, ts: str, sent: str) -> None:
+    """ "What we actually sent" as a reply in the card's thread. The card is already stored, so a
+    failure here is only logged: a retry must not post the card again."""
+    try:
+        deps.slack.chat_postMessage(
+            channel=channel,
+            thread_ts=ts,
+            text="What we actually sent",
+            blocks=actually_sent_blocks(sent),
+            **NO_UNFURL,
+        )
+    except Exception as exc:  # noqa: BLE001 - the card itself is fine
+        logger.warning("could not post 'what we actually sent': %s", type(exc).__name__)
 
 
 def messages_from_rows(rows: list[Row]) -> list[tuple[Message, Row]]:

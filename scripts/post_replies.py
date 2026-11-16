@@ -15,8 +15,10 @@ set). Like the live app it skips a thread that already has a card, and a thread 
 reply was on an earlier day (that day's reply is a follow-up, which the app stores but never
 classifies).
 
-For this script only, a card also shows "What we actually sent:" (first 600 characters) when we
-already answered the lead after their reply with something that is not a sequence step.
+For this script only, a card also gets a reply in its Slack thread, "What we actually sent", when
+we already answered the lead after their reply with something that is not a sequence step.
+Replies that need no action (out of office, unsubscribe, ...) get no card: they wait for the daily
+summary (scripts/post_digest.py).
 
 Reads Smartlead (never sends, never changes anything there). Writes to the database and Slack only
 with --apply. SEND_ENABLED must be false. Lead email addresses are never printed.
@@ -176,6 +178,7 @@ def main() -> int:
             settings.DRAFT_MODEL,
             settings.PRICE_SENTENCE,
             vertical_of=verticals.for_thread,
+            signature=settings.DRAFT_SIGNATURE,
         ),
         verticals=verticals,
         config=IngestConfig.from_settings(settings),

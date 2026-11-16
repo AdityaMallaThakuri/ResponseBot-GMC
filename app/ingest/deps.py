@@ -23,13 +23,14 @@ class IngestConfig:
     min_confidence_not_interested: float = 0.90
     draft_min_confidence: float = 0.75  # below this a reply is not drafted (C3)
     draft_channel: str | None = None  # draft-lane cards
-    alert_channel: str | None = None  # human_only and would_suppress notices; falls back to draft
+    alert_channel: str | None = None  # the daily summary of replies that need no action
 
     def channel_for_kind(self, kind: str) -> str | None:
-        """A one-line "notice" card goes to the alert channel (else the draft channel); a draft
-        card, or a card where a person writes the reply, goes to the draft channel."""
+        """Only a draft card, or a card where Ray writes the reply, is posted, to the draft
+        channel. A no-action reply ("notice") is never posted as a card: it goes to the daily
+        summary (app/slack/digest.py)."""
         if kind == "notice":
-            return self.alert_channel or self.draft_channel
+            return None
         return self.draft_channel or self.alert_channel
 
     def channel_for(self, lane: str) -> str | None:
@@ -98,6 +99,7 @@ def build_deps(settings: Settings) -> IngestDeps:
             settings.DRAFT_MODEL,
             settings.PRICE_SENTENCE,
             vertical_of=verticals.for_thread,
+            signature=settings.DRAFT_SIGNATURE,
         ),
         config=IngestConfig.from_settings(settings),
     )

@@ -86,6 +86,7 @@ def main() -> int:
         settings.DRAFT_MODEL,
         settings.PRICE_SENTENCE,
         vertical_of=verticals.for_thread,
+        signature=settings.DRAFT_SIGNATURE,
     )
 
     found: list[tuple[dict[str, Any], Any, list[Any]]] = []

@@ -31,7 +31,9 @@ Settings (not secret):
 | `PUBLIC_BASE_URL` | the Railway domain, `https://<name>.up.railway.app` (no trailing path) |
 | `AUTO_ATTACH_WEBHOOKS` | `false` at first (the hourly job only reports, in the log and in Slack); `true` when you want it to attach |
 | `SLACK_DRAFT_CHANNEL` | channel for draft cards (name or id) |
-| `SLACK_ALERT_CHANNEL` | channel for notices (optional, falls back to the draft channel) |
+| `SLACK_ALERT_CHANNEL` | channel for the daily summary of replies that need no action (optional; empty: they are stored and nothing posts) |
+| `DIGEST_HOUR` | hour (0-23, UTC, default 14) the daily summary is posted |
+| `DRAFT_SIGNATURE` | text added after every draft (a backslash and n is a line break); empty: drafts have no sign-off |
 | `LEARN_INTERVAL_MINUTES` | `30` (the learning loop runs inside the app; 0 turns it off) |
 | `PRICE_SENTENCE` | the M&A price sentence, used word for word (non-M&A campaigns ignore it). Current value: `But to give you an idea we work on a hybrid model of retainer + success fee.` Empty: M&A price cards say "Price not confirmed" |
 | `DRAFT_MODEL`, `CLASSIFIER_MODEL`, `DRAFT_MIN_CONFIDENCE`, `CLASSIFIER_MIN_CONFIDENCE*` | optional; defaults are fine |

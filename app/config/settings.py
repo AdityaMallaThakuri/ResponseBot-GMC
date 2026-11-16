@@ -97,6 +97,12 @@ class Settings(BaseSettings):
     # Empty: the most recent price sentence in the example library is used and the card says
     # "Price not confirmed: check with Aryan".
     PRICE_SENTENCE: str = ""
+    # Added after the last sentence of every draft (a backslash and n makes a line break). Empty:
+    # drafts end after their last sentence and never carry a sign-off like "Best, Aryan / CEO".
+    DRAFT_SIGNATURE: str = ""
+    # The daily summary of replies that need no action is posted to SLACK_ALERT_CHANNEL at this
+    # hour (0 to 23, UTC). Without SLACK_ALERT_CHANNEL those replies are stored and nothing posts.
+    DIGEST_HOUR: int = 14
     # Slack channels (name or id). Optional until the step that posts to them is built.
     SLACK_DRAFT_CHANNEL: str | None = None
     SLACK_LOG_CHANNEL: str | None = None
@@ -104,7 +110,9 @@ class Settings(BaseSettings):
     SLACK_SHADOW_CHANNEL: str | None = None
     SLACK_OPS_CHANNEL: str | None = None
 
-    @field_validator("LEARN_INTERVAL_MINUTES", "SYNC_INTERVAL_MINUTES", mode="before")
+    @field_validator(
+        "LEARN_INTERVAL_MINUTES", "SYNC_INTERVAL_MINUTES", "DIGEST_HOUR", mode="before"
+    )
     @classmethod
     def _blank_interval_is_default(cls, value: object, info: ValidationInfo) -> object:
         if isinstance(value, str) and not value.strip():
@@ -139,6 +147,13 @@ class Settings(BaseSettings):
     def _confidence_in_range(cls, value: float) -> float:
         if not 0 <= value <= 1:
             raise ValueError("must be between 0 and 1")
+        return value
+
+    @field_validator("DIGEST_HOUR")
+    @classmethod
+    def _digest_hour_in_range(cls, value: int) -> int:
+        if not 0 <= value <= 23:
+            raise ValueError("must be an hour from 0 to 23 (UTC)")
         return value
 
     @field_validator("WEBHOOK_SECRET")

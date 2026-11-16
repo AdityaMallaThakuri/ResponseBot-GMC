@@ -28,6 +28,9 @@ Numbers (policy, enforced in code as well as in the prompt):
   link replaces [LINK] on a lead_magnet_request draft for an M&A campaign. Every other [LINK] stays.
 - Scheduling: clock times are never allowed (the sentence is removed) and day words used for
   scheduling (today, tomorrow, Monday to Sunday) become [TIME OPTIONS].
+- Sign-off: a draft ends after its last sentence. "Best, / Aryan Aryal / CEO | Gamic Media" is
+  removed (`app/examples/signature.py`) unless the DRAFT_SIGNATURE setting is set, which is then
+  added.
 - Every figure left in the draft is listed in `flagged` so the Slack card can highlight it for the
   person who copies the draft.
 """
@@ -46,6 +49,7 @@ from typing import Any
 from app.classify.classifier import mask
 from app.examples.library import K_EXAMPLES, Example, select_examples
 from app.examples.links import Links, fill_links, load_links
+from app.examples.signature import with_signature
 from app.examples.verticals import is_ma
 
 logger = logging.getLogger(__name__)
@@ -474,8 +478,10 @@ class ExampleDrafter:
         price_sentence: str = "",
         vertical_of: Callable[[dict[str, Any]], str] | None = None,
         links: Links | None = None,
+        signature: str = "",
     ) -> None:
         self.links = links if links is not None else load_links()
+        self.signature = signature  # DRAFT_SIGNATURE: empty means no sign-off at all
         self.load_pool = load_pool
         self.vertical_of = vertical_of
         self.client = client
@@ -600,6 +606,7 @@ class ExampleDrafter:
             text, removed, length_fix = self._shorten(
                 user, text, removed, limit, finish, examples[0], first_name
             )
+        text = with_signature(text, self.signature)  # no sign-off unless DRAFT_SIGNATURE is set
         if not text.strip():
             return ExampleOutcome("no_draft", "model_could_not_answer_without_new_facts")
         return ExampleOutcome(

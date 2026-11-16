@@ -3,6 +3,7 @@ import logging
 import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI
@@ -18,6 +19,7 @@ from app.ingest.webhook import router as webhook_router
 from app.slack.app import create_slack_handler
 from app.slack.app import router as slack_router
 from app.slack.card import escape_mrkdwn
+from app.slack.digest import post_digest, seconds_until_hour
 from app.slack.feedback import record_feedback
 from app.smartlead.watch import AttachJob
 
@@ -44,6 +46,21 @@ async def sync_loop(app: FastAPI, minutes: int) -> None:
             await run_in_threadpool(sync_once, get_deps(app), get_settings())
         except Exception as exc:  # noqa: BLE001 - keep looping; the next run tries again
             log.error("example sync run failed: %s", type(exc).__name__)
+
+
+async def digest_loop(app: FastAPI, hour: int) -> None:
+    """Every day at `hour` (UTC), post the summary of replies that need no action. Never raises."""
+    while True:
+        await asyncio.sleep(seconds_until_hour(hour, datetime.now(UTC)))
+        try:
+            deps = get_deps(app)
+            settings = get_settings()
+            await run_in_threadpool(
+                post_digest, deps.db, deps.slack, settings.SLACK_ALERT_CHANNEL, deps.config
+            )
+        except Exception as exc:  # noqa: BLE001 - keep looping; tomorrow's run tries again
+            log.error("daily summary failed: %s", type(exc).__name__)
+        await asyncio.sleep(61)  # never fire twice in the same minute
 
 
 WEBHOOK_JOB_MINUTES = 60
@@ -115,13 +132,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sync_task = None
     if settings.SYNC_INTERVAL_MINUTES > 0:
         sync_task = asyncio.create_task(sync_loop(app, settings.SYNC_INTERVAL_MINUTES))
+    digest_task = None
+    if settings.SLACK_ALERT_CHANNEL:
+        digest_task = asyncio.create_task(digest_loop(app, settings.DIGEST_HOUR))
+    else:
+        log.info("SLACK_ALERT_CHANNEL is not set: no-action replies are stored, no summary posts")
     job_task = None
     if settings.PUBLIC_BASE_URL.strip():
         job_task = asyncio.create_task(webhook_job_loop(app))
     else:
         log.info("PUBLIC_BASE_URL is not set: the webhook attach job is off")
     yield
-    for t in (task, sync_task, job_task):
+    for t in (task, sync_task, job_task, digest_task):
         if t is not None:
             t.cancel()
             with suppress(asyncio.CancelledError):

@@ -94,6 +94,7 @@ def build(settings: Any) -> IngestDeps:
             settings.DRAFT_MODEL,
             settings.PRICE_SENTENCE,
             vertical_of=verticals.for_thread,
+            signature=settings.DRAFT_SIGNATURE,
         ),
         config=IngestConfig.from_settings(settings),
     )

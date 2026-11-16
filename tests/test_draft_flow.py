@@ -159,7 +159,8 @@ def test_below_the_draft_threshold_goes_to_human_only() -> None:
 def test_labels_outside_the_draft_lane_are_never_drafted(label: str) -> None:
     deps = make_deps(label, confidence=0.99)
     run(deps)
-    assert not rows(deps.db, "drafts") and "draft_good" not in buttons(deps.slack.posts[0])
+    assert not rows(deps.db, "drafts")
+    assert not deps.slack.posts or "draft_good" not in buttons(deps.slack.posts[0])
 
 
 def test_do_not_contact_is_never_drafted() -> None:

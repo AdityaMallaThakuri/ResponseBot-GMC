@@ -227,6 +227,15 @@ def test_the_draft_uses_the_examples_and_never_keeps_a_link() -> None:
     assert "[TIME OPTIONS]" in system and "[LINK]" in system and "Add no new facts" in system
 
 
+def test_the_draft_has_no_sign_off_unless_the_signature_setting_is_set() -> None:
+    signed = "Hey Pat, happy to explain.\n\nBest,\n\nAryan Aryal\n\nCEO | Gamic Media"
+    out = draft_with(drafter(reply_with(signed)))
+    assert out.text == "Hey Pat, happy to explain." and out.word_count == 5
+    configured = drafter(reply_with(signed))
+    configured.signature = "Best,\\nRay"
+    assert draft_with(configured).text == "Hey Pat, happy to explain.\n\nBest,\nRay"
+
+
 PRICE_REPLY = "Pricing is typically $2,000 to $4,000 per month for most firms."
 
 
@@ -546,8 +555,9 @@ def test_do_not_contact_gets_a_do_not_reply_card_and_no_model_call() -> None:
     deps = make_deps(model, label="do_not_contact", conf=0.95)
     run(deps)
     assert not model.calls and not rows(deps.db, "drafts")
-    text = json.dumps(deps.slack.posts[0]["blocks"])
-    assert "unsubscribe: do not reply" in text and actions(deps.slack.posts[0]) == []
+    assert deps.slack.posts == []  # never in the draft channel: it waits for the daily summary
+    (card_row,) = rows(deps.db, "slack_cards")
+    assert (card_row["channel"], card_row["status"]) == ("digest", "pending")
 
 
 @pytest.mark.parametrize("label", ["out_of_office", "auto_reply_or_bounce"])
@@ -556,8 +566,8 @@ def test_out_of_office_and_auto_replies_get_a_short_note_and_no_draft(label: str
     deps = make_deps(model, label=label, conf=0.95)
     run(deps)
     assert not model.calls and not rows(deps.db, "drafts")
-    words = {"out_of_office": "out of office", "auto_reply_or_bounce": "automatic reply"}[label]
-    assert words in json.dumps(deps.slack.posts[0]["blocks"])
+    assert deps.slack.posts == []  # no card: it waits for the daily summary
+    assert [c["channel"] for c in rows(deps.db, "slack_cards")] == ["digest"]
 
 
 def test_nothing_is_sent_and_smartlead_is_only_read() -> None:
