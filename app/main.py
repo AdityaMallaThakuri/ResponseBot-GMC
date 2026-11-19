@@ -103,7 +103,7 @@ async def webhook_job_loop(app: FastAPI) -> None:
                 app.state.attach_job = job
             await run_in_threadpool(job.run_once)
         except Exception as exc:  # noqa: BLE001 - keep looping; the next run tries again
-            log.error("webhook job run failed: %s", type(exc).__name__)
+            log.error("webhook job run failed: %s: %s", type(exc).__name__, str(exc)[:300])
         await asyncio.sleep(WEBHOOK_JOB_MINUTES * 60)
 
 

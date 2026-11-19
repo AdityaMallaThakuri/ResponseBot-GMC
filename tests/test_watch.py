@@ -110,6 +110,7 @@ class FakeSmartlead:
         self.created: list[tuple[int, str]] = []
         self.fail_list = False
         self.fail_create: set[int] = set()
+        self.fail_hooks: set[int] = set()
 
     def list_campaigns(self) -> list[dict[str, Any]]:
         self.list_calls += 1
@@ -118,6 +119,8 @@ class FakeSmartlead:
         return list(self.campaigns)
 
     def list_campaign_webhooks(self, campaign_id: int) -> list[dict[str, Any]]:
+        if campaign_id in self.fail_hooks:
+            raise SmartleadError("HTTP 404")
         return self.hooks.get(campaign_id, [])
 
     def create_campaign_webhook(self, campaign_id: int, name: str, url: str) -> None:
@@ -217,6 +220,15 @@ def test_the_first_ever_run_posts_one_summary_with_the_total_only() -> None:
     assert notes == ["Watching 4 campaigns."]  # no names, one message not four
     assert result.summary == notes[0]
     assert store.announced("watching") == {1, 2, 3, 8}
+
+
+def test_one_unreadable_campaign_is_skipped_and_the_rest_still_run() -> None:
+    sl = FakeSmartlead()
+    sl.fail_hooks = {2}
+    job, _, _ = make_job(sl, settings(AUTO_ATTACH_WEBHOOKS=True))
+    result = job.run_once()  # does not raise
+    assert sorted(c for c, _ in sl.created) == [1, 3, 8]  # 2 is neither attached nor announced
+    assert result.failed == 0
 
 
 def test_a_restart_with_nothing_new_posts_nothing() -> None:

@@ -18,6 +18,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from app.smartlead.errors import SmartleadError
+
 logger = logging.getLogger(__name__)
 
 PATH = "/webhooks/smartlead"
@@ -237,13 +239,22 @@ class AttachJob:
         watched = watched_campaigns(
             campaigns, settings.gmc_campaign_ids, settings.ignore_campaign_ids
         )
-        have = [
-            w
-            for w in watched
-            if any(is_ours(h, base) for h in self._client.list_campaign_webhooks(w.id))
-        ]
+        have: list[Watched] = []
+        unchecked: set[int] = set()
+        for w in watched:
+            try:
+                hooks = self._client.list_campaign_webhooks(w.id)
+            except SmartleadError as exc:
+                # Unknown state: neither count it as watching nor attach (could duplicate).
+                unchecked.add(w.id)
+                logger.error("webhook job: could not read webhooks of %d: %s", w.id, exc)
+                continue
+            if any(is_ours(h, base) for h in hooks):
+                have.append(w)
         have_ids = {w.id for w in have}
-        missing = [w for w in watched if w.id not in have_ids]
+        missing = [w for w in watched if w.id not in have_ids and w.id not in unchecked]
+        if unchecked:
+            logger.warning("webhook job: %d campaigns skipped (unreadable)", len(unchecked))
         attach = settings.AUTO_ATTACH_WEBHOOKS
         logger.info(
             "webhook job: %d watched, %d without our webhook, auto attach %s",
